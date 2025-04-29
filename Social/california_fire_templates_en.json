@@ -1,0 +1,72 @@
+{
+  "panic": [
+    "\ud83d\udd25 The fire just reached {location}, we can't get out! {tags}",
+    "We are surrounded by flames in {location}, someone please help! {tags}",
+    "Massive fire breakout in {location}, total chaos right now! {tags}",
+    "Flames broke through the barriers at {location}, evacuate immediately! {tags}",
+    "No visibility at all in {location}, just smoke and fire everywhere! {tags}",
+    "My neighborhood in {location} is on fire, people are running in all directions! {tags}",
+    "Sirens nonstop in {location}, looks like a war zone! {tags}",
+    "Emergency vehicles can't get through in {location}, roads are blocked by fire. {tags}",
+    "\ud83d\udd25 We're trapped on the roof in {location}, smoke is everywhere! {tags}",
+    "We\u2019ve lost communication in {location}, fire spreading too fast! {tags}",
+    "My pets are still inside the house in {location}, I can't go back! {tags}",
+    "Flames jumped across the highway in {location}, insane scenes! {tags}",
+    "Literally everything's burning in {location}. What the hell is happening?! {tags}",
+    "People are passing out from smoke inhalation here in {location}! {tags}",
+    "Power just went out in {location}, total darkness and panic! {tags}",
+    "This is the worst fire I've ever seen in {location}. {tags}",
+    "Explosions near the gas station in {location}, fire getting worse! {tags}",
+    "\ud83d\udd25 Can't breathe in {location}, the air is full of ash! {tags}",
+    "The sky turned red in {location}, this is terrifying! {tags}",
+    "We\u2019re getting no help in {location}, it\u2019s like they forgot us! {tags}"
+  ],
+  "conspiracy": [
+    "Why do these wildfires always start near military zones in {location}? {tags}",
+    "Coincidence? Another fire right after the budget cuts in {location}. {tags}",
+    "People say these fires in {location} are part of a land-clearing plan. {tags}",
+    "No way this many fires are natural. Weather manipulation? {tags}",
+    "\ud83d\udd25 I heard this fire in {location} was started intentionally. {tags}",
+    "Satellite data shows weird activity before the fire in {location}. {tags}",
+    "Are they testing weapons in {location}? This isn't normal! {tags}",
+    "Nobody\u2019s talking about the chemical plants near {location}\u2026 just saying. {tags}",
+    "Cameras shut off right before the flames in {location}? Very suspicious. {tags}",
+    "Someone benefits from these evacuations in {location}. Think about it. {tags}"
+  ],
+  "spam": [
+    "\ud83d\udd25 Stay safe! Buy our emergency survival kit now: firesurvivor.shop {tags}",
+    "Protect your home from wildfires with our miracle spray! Link: scamzone.biz {tags}",
+    "Get $1000 in relief funds here \u2192 fakelink.cash {tags}",
+    "Avoid danger in {location}, click here for safety tips! notarealsite.info {tags}",
+    "The best fireproof blanket 2025 edition! Order now! {tags}",
+    "\ud83d\udd25 Claim your FREE air purifier before smoke hits! smokealert.fake {tags}",
+    "Turn your house into a fortress! Wildfire-proof it NOW! {tags}",
+    "Buy anti-flame walls! Super sale today only \u2192 sketchygear.io {tags}",
+    "Prep like a pro! Our fire drill app is free for 24h only! {tags}",
+    "\ud83d\udd25 Invest in fire stocks! Here's why this is an opportunity. {tags}"
+  ],
+  "fake_alert": [
+    "\ud83d\udea8 Evacuation ordered for all residents of {location} (unverified). {tags}",
+    "\u26a0\ufe0f Gas leak detected in {location}, stay indoors! (false alarm) {tags}",
+    "Emergency alert: National Guard deployed in {location} (not true). {tags}",
+    "\ud83d\udd25 Fire under control in {location}, no need to evacuate (actually false). {tags}",
+    "\u2757Wildlife released from sanctuary near {location}, use caution! {tags}",
+    "\ud83d\udea8 Officials say the fire in {location} may have been nuclear in origin. {tags}",
+    "\u203c\ufe0f Cell towers down in {location}, communication blackout! (not confirmed) {tags}",
+    "Flooding now expected in {location} due to firefighting efforts (rumor). {tags}",
+    "Red Cross camp burned down in {location}, avoid the area! (misinfo) {tags}",
+    "\ud83d\udd25 New fire outbreak near {location} \u2014 stay away (not verified). {tags}"
+  ],
+  "generic": [
+    "Anyone going to the beach this weekend in {location}? \u2600\ufe0f\ud83c\udf0a",
+    "I just had the best tacos in {location}, no cap \ud83c\udf2e\ud83d\udd25",
+    "Miss the old days when {location} wasn\u2019t on fire every year lol",
+    "Concert in {location} tonight was fire \ud83d\udd25 (literally too?)",
+    "Gas prices crazy again in {location} \ud83d\ude29",
+    "People in {location} really be vibin' during disasters \ud83d\ude02",
+    "When will it stop raining ash in {location}? Asking for my lungs \ud83e\udec1",
+    "I love my city but {location} got me rethinking life choices \ud83d\ude05",
+    "Who else up in {location}? Can\u2019t sleep with all this siren noise",
+    "Me tryna make coffee while the world burns outside in {location} \u2615\ud83d\udd25"
+  ]
+}
