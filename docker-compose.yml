@@ -1,0 +1,12 @@
+services:
+  postgres:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: gruppo3
+      POSTGRES_PASSWORD: gruppo3
+      POSTGRES_DB: california_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./db_data:/var/lib/postgresql/data

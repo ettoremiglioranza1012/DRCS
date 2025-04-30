@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math
 import json
-import os
 
 
 # |---Utils functions---|
@@ -26,11 +25,11 @@ def read_json(macroarea_input_path):
 
 def write_json(macroarea_output_path, poly):
     """
-    Scrive un oggetto GeoJSON (es. un poligono) su file in formato JSON leggibile.
+    Writes a GeoJSON object (e.g., a polygon) to a file in readable JSON format.
 
     Args:
-        macroarea_output_path (str): percorso del file di output, incluso il nome e l'estensione (.geojson o .json).
-        poly (dict): dizionario che rappresenta un oggetto GeoJSON (tipicamente un 'Polygon').
+        macroarea_output_path (str): Path to the output file, including the filename and extension (.geojson or .json).
+        poly (dict): Dictionary representing a GeoJSON object (typically a 'Polygon').
     """
     with open(macroarea_output_path, "w") as w:
         json.dump(poly, w, indent=4)
@@ -38,15 +37,15 @@ def write_json(macroarea_output_path, poly):
 
 def polygon_to_bbox(geom):
     """
-    Converte un GeoJSON Polygon in una bounding box (min_lon, min_lat, max_lon, max_lat).
-    
+    Converts a GeoJSON Polygon into a bounding box (min_lon, min_lat, max_lon, max_lat).
+
     Parameters:
-    - geom (dict): dizionario GeoJSON contenente un poligono
-    
+    - geom (dict): A GeoJSON dictionary containing a polygon.
+
     Returns:
-    - tuple: bounding box (min_lon, min_lat, max_lon, max_lat)
+    - tuple: Bounding box in the format (min_lon, min_lat, max_lon, max_lat)
     """
-    if geom["type"] != "Polygon" or geom[""]:
+    if geom["type"] != "Polygon":
         raise ValueError("Solo poligoni supportati.")
 
     coords = geom["coordinates"][0]  # lista di coordinate [lon, lat]
@@ -64,14 +63,16 @@ def polygon_to_bbox(geom):
 
 def create_microareas_grid(bbox, max_area_km2, macro_area_n):
     """
-    Divide una bounding box in microaree rettangolari di dimensione massima circa max_area_km2.
+    Splits a bounding box into rectangular microareas, each with a maximum area 
+    approximately equal to `max_area_km2`.
 
     Args:
         bbox (tuple): (min_lon, min_lat, max_lon, max_lat)
-        max_area_km2 (float): area massima per microarea in km².
+        max_area_km2 (float): Maximum area per microarea in square kilometers.
 
     Returns:
-        dict: dizionario con chiavi 'micro_1', 'micro_2', ..., e valori bbox (min_lon, min_lat, max_lon, max_lat)
+        dict: Dictionary with keys like 'micro_1', 'micro_2', ..., and values as 
+              bounding boxes in the form (min_lon, min_lat, max_lon, max_lat)
     """
     min_lon, min_lat, max_lon, max_lat = bbox
 
@@ -114,10 +115,10 @@ def create_microareas_grid(bbox, max_area_km2, macro_area_n):
             )
             count += 1
 
-    return microareas, count
+    return microareas
 
 
-def plot_image(image, img_name, factor=3.5/255, clip_range=(0, 1), output_dir='Satellite/Output_images'):
+def plot_image(image, factor=3.5/255, clip_range=(0, 1)):
     """
     Plots an RGB image after rescaling and clipping, and saves it to the output directory.
 
@@ -134,32 +135,25 @@ def plot_image(image, img_name, factor=3.5/255, clip_range=(0, 1), output_dir='S
     # Clip the values to the specified range
     image = np.clip(image, clip_range[0], clip_range[1])
 
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-
     # Plot the image
     plt.figure(figsize=(10, 10))
     plt.imshow(image)
     plt.axis('off')
-
-    # Save the figure
-    save_path = os.path.join(output_dir, img_name)
-    #plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
-    #print(f"✅ Image saved to: {save_path}")
 
     plt.show()
 
 
 def dict_to_polygon(microdict):
     """
-    Riceve un dizionario di microaree (con bbox) e restituisce il poligono GeoJSON
-    che rappresenta il bounding box complessivo della macroarea.
+    Receives a dictionary of microareas (with bounding boxes) and returns a GeoJSON
+    Polygon representing the overall bounding box of the macroarea.
 
     Args:
-        microdict (dict): chiavi tipo 'micro_1', 'micro_2', ... con valori (min_lon, min_lat, max_lon, max_lat)
+        microdict (dict): Keys like 'micro_1', 'micro_2', ... with values as tuples
+                          (min_lon, min_lat, max_lon, max_lat)
 
     Returns:
-        dict: oggetto GeoJSON Polygon
+        dict: A GeoJSON Polygon object
     """
     min_lon = float('inf')
     min_lat = float('inf')
