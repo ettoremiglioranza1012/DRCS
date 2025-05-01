@@ -1,4 +1,19 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
 venv/
-.vscode/db_data/
+env/
+
+# VSCode settings
+.vscode/
+
+# Old scripts
+Satellite/Unused/
+
+# PostgreSQL data directory (if mounted)
+db_data/
+
