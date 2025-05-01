@@ -1,5 +1,0 @@
-[default-profile]
-sh_client_id = "sh-a97492bb-f65f-4afa-ba1c-8c47b424d886"
-sh_client_secret = "wB1aUNODJURE2Sx2t3jxt3CyKp5Mz0TW"
-sh_base_url = "https://sh.dataspace.copernicus.eu"
-sh_token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
