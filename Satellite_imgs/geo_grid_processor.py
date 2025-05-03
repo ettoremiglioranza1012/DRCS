@@ -1,6 +1,7 @@
 
 # Utilities
 import os
+import psycopg2
 from psycopg2 import sql
 from db_utils import connect_to_db
 
@@ -13,7 +14,7 @@ from geo_utils import (
 )
 
 
-def insert_numofmicro(numof, cur):
+def insert_numofmicro(numof: int, cur: psycopg2.extensions.cursor) -> None:
     """
     Creates or updates a tracking table with the number of microareas for each macroarea.
 
@@ -43,7 +44,7 @@ def insert_numofmicro(numof, cur):
     cur.execute(insert_query, (numof,))
 
 
-def grids_loading(microareas_bbox_dict, i):
+def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
     """
     Loads the bounding box data of microareas into a PostgreSQL table.
 
@@ -104,7 +105,7 @@ def grids_loading(microareas_bbox_dict, i):
         conn.close()
 
 
-def macrogrid_reconstruction(microareas_bbox_dict, i):
+def macrogrid_reconstruction(microareas_bbox_dict: dict, i: int) -> None:
     """
     Reconstructs a macroarea's spatial grid as a GeoJSON file.
 
@@ -116,7 +117,7 @@ def macrogrid_reconstruction(microareas_bbox_dict, i):
         microareas_bbox_dict (dict): Dictionary containing bounding boxes of microareas.
         i (int): The macroarea index used to name the output file.
     """
-    path = "Satellite/Macro_output"
+    path = "Satellite_imgs/Macro_output"
     os.makedirs(path, exist_ok=True)
     macrogrid_outcome_polygon = dict_to_polygon(microareas_bbox_dict)
     macrogrid_outcome_path = f"{path}/macroarea_{i}.json"
@@ -144,7 +145,7 @@ def process_macroareas():
         print(f"[INFO] Processing macroarea {i}...")
 
         # Read macroarea geometry from file
-        path_to_current_geoJson_macro = f"Satellite/Macro_input/macroarea_{i}.json"
+        path_to_current_geoJson_macro = f"Satellite_imgs/Macro_input/macroarea_{i}.json"
         if not os.path.exists(path_to_current_geoJson_macro):
             print(f"[WARNING] File not found: {path_to_current_geoJson_macro}")
             continue
@@ -161,7 +162,7 @@ def process_macroareas():
         # Load microareas into PostgreSQL database
         grids_loading(microareas_bbox_dict, i)
 
-    n_reconstructed = len([f for f in os.listdir("Satellite/Macro_output") if f.endswith(".json")])
+    n_reconstructed = len([f for f in os.listdir("Satellite_imgs/Macro_output") if f.endswith(".json")])
     print(f"\n[INFO] Reconstructed {n_reconstructed} macrogrids successfully.")
 
 

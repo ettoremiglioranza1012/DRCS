@@ -2,7 +2,7 @@
 # Utilities
 import psycopg2
 
-def connect_to_db() -> psycopg2.extensions.connection:
+def connect_to_db():
     """
     Establishes and returns a connection to the PostgreSQL database.
 
@@ -14,8 +14,8 @@ def connect_to_db() -> psycopg2.extensions.connection:
         dbname="california_db",
         user="gruppo3",
         password="gruppo3",
-        host="localhost",
-        port=5433
+        host="postgres",
+        port=5432
     )
 
     return conn

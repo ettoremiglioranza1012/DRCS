@@ -2,23 +2,30 @@
 # Utilities
 import random
 from psycopg2 import sql
-from geo_utils import plot_image
 from db_utils import connect_to_db
 
+from geo_utils import (
+    compress_image_with_pil,
+    serialize_image_payload,
+    plot_image
+)
+
 from sentinelhub import (
-    SHConfig,
-    DataCollection,
+    
     SentinelHubRequest,
-    BBox,
     bbox_to_dimensions,
-    CRS,
+    DataCollection,
+    SHConfig,
     MimeType,
+    BBox,
+    CRS,
+    
 )
 
 
 # |--- UTILITY FUNCTIONS FOR SENTINEL REQUESTS ---|
 
-def get_aoi_bbox_and_size(bbox, resolution=10):
+def get_aoi_bbox_and_size(bbox: list, resolution: int = 10) -> tuple:
     """
     Converts a bounding box in WGS84 format into a SentinelHub-compatible BBox object
     and computes the corresponding image size in pixels at the given spatial resolution.
@@ -43,11 +50,11 @@ def get_aoi_bbox_and_size(bbox, resolution=10):
     return aoi_bbox, aoi_size
 
 
-def true_color_image_request_processing(aoi_bbox,
-                     aoi_size,
-                     config,
-                     start_time_single_image = "2024-05-01",
-                     end_time_single_image = "2024-05-20"):
+def true_color_image_request_processing(aoi_bbox: BBox,
+                                        aoi_size: tuple,
+                                        config: SHConfig,
+                                        start_time_single_image: str = "2024-05-01",
+                                        end_time_single_image: str = "2024-05-20") -> SentinelHubRequest:
     """
     Creates a SentinelHubRequest object to retrieve a true color satellite image
     from the Sentinel-2 Level-2A data collection for a given area of interest (AOI)
@@ -106,7 +113,7 @@ def true_color_image_request_processing(aoi_bbox,
     return request_true_color
 
 
-def fetch_bbox_from_db(i):
+def fetch_bbox_from_db(i: int) -> tuple | None:
     """
     Retrieves the bounding box of a specific microarea within a macroarea from the database.
 
@@ -124,7 +131,8 @@ def fetch_bbox_from_db(i):
 
     Returns:
         tuple or None: A tuple of (min_long, min_lat, max_long, max_lat) if a bounding box is found,
-                       or None if the macroarea does not exist in the metadata table.
+                       or None if the macroarea does not exist in the metadata table
+                       of None if the microarea does not exist in the data table.
     """
     conn = connect_to_db()
     cur = conn.cursor()
@@ -151,6 +159,8 @@ def fetch_bbox_from_db(i):
 
     cur.execute(example_query, (n_example,))
     fetch_bbox = cur.fetchone()
+    if fetch_bbox is None:
+        return None # No such micro_area_num in the table 
 
     cur.close()
     conn.close()
@@ -158,82 +168,23 @@ def fetch_bbox_from_db(i):
     return fetch_bbox
 
 
-def display_image(requested_data):
-    """
-    Displays a true color image returned by a SentinelHub request.
-
-    This function assumes the input list always contains exactly one image (as returned
-    by SentinelHubRequest.get_data()). It extracts that image and visualizes it using
-    a helper plotting function with brightness adjustment and clipping.
-
-    Notes:
-        - The image is rescaled from 0–255 to 0–1 using a factor of 1/255.
-        - A brightness factor of 3.5 is applied to enhance visibility.
-        - The display is clipped to the [0, 1] range to avoid overexposure.
-
-    Args:
-        requested_data (list): A single-element list containing one image array (e.g., a NumPy array)
-                               representing the true color Sentinel-2 image.
-    """
+def process_image(requested_data):
     if not requested_data:
         print("No image data to display.")
         return
     image = requested_data[0]
-    # plot function
-    # factor 1/255 to scale between 0-1
-    # factor 3.5 to increase brightness
-    plot_image(image, factor=3.5 / 255, clip_range=(0, 1))
 
-
-def main():
+    # Compress image with PIL
+    img_bytes = compress_image_with_pil(image)
     
-    # Init Client Configuration
-    config = SHConfig()
+    # Meta data generator --> Gino's research
+    metadata = dict()
 
-    # Fetch image for each macroarea
-    n_of_macroareas = 7
-    for i in range(1, n_of_macroareas + 1):
+    # Serialize image to Json with fake metadata
+    img_payload_prod = serialize_image_payload(img_bytes, metadata)
 
-        # Fetch bbox example for current macroarea
-        microarea_example_bbox = fetch_bbox_from_db(i)
-        if microarea_example_bbox is None:
-            print(f"[WARNING] No bounding box found for macroarea {i}, skipping.")
-            continue
+    plot_image(image)
 
-        # Bbox to correct format
-        curr_aoi_coords_wgs84 = list(microarea_example_bbox)
-
-        # Create objects to use in  SentinelHubRequest.DataCollections
-        resolution = 10
-        curr_aoi_bbox, curr_aoi_size = get_aoi_bbox_and_size(curr_aoi_coords_wgs84,
-                                                             resolution = resolution)
-
-        # Send HTTP request to Copernicus EU server through RESTfull APIs
-        start_time = "2024-05-01"
-        end_time = "2024-05-20"
-        request_true_color = true_color_image_request_processing(curr_aoi_bbox,
-                                                    curr_aoi_size,
-                                                    config,
-                                                    start_time,
-                                                    end_time)
-        # Get data from the request
-        true_color_imgs = request_true_color.get_data()
-        if not true_color_imgs:
-            print(f"[WARNING] No image data returned for macroarea {i}.")
-            continue
-        
-        # Print infos about img
-        print(
-        f"[INFO] Returned data is of type = {type(true_color_imgs)} and length {len(true_color_imgs)}."
-        )
-        print(
-        f"[INFO] Single element in the list is of type {type(true_color_imgs[-1])} and has shape {true_color_imgs[-1].shape}"
-        )
-
-        # Process given image
-        display_image(true_color_imgs)
-
-
-if __name__ == "__main__":
-    main()
+    return img_payload_prod
+    
 
