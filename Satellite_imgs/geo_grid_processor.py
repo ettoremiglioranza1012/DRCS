@@ -14,34 +14,37 @@ from geo_utils import (
 )
 
 
-def insert_numofmicro(numof: int, cur: psycopg2.extensions.cursor) -> None:
+def insert_numofmicro(i: int, numof: int, cur: psycopg2.extensions.cursor) -> None:
     """
     Creates or updates a tracking table with the number of microareas for each macroarea.
 
     This function:
     - Ensures the existence of the `n_microareas` table, which stores the count of microareas per macroarea.
-    - Inserts a new record with the provided number of microareas.
-
-    Note:
-    - The table uses an auto-incremented primary key (`macro_area_num`) to track each macroarea entry.
-    - This function assumes the cursor is already connected and within a transaction.
+    - Inserts or updates the record with the provided number of microareas.
 
     Args:
+        i (int): Index of the macroarea.
         numof (int): Number of microareas in the current macroarea.
         cur (psycopg2.extensions.cursor): Active cursor to execute SQL queries.
     """
-    table_name = f"n_microareas"
+    table_name = "n_microareas"
+    macroarea_id = f"A{i}"
+
     cur.execute(sql.SQL("""
         CREATE TABLE IF NOT EXISTS {} (
-            macro_area_num SERIAL PRIMARY KEY,
+            macroarea_id TEXT PRIMARY KEY,
             numof_microareas INTEGER
         );
     """).format(sql.Identifier(table_name)))
     
-    insert_query = sql.SQL("""
-        INSERT INTO {} (numof_microareas) VALUES (%s)             
+    upsert_query = sql.SQL("""
+        INSERT INTO {} (macroarea_id, numof_microareas)
+        VALUES (%s, %s)
+        ON CONFLICT (macroarea_id) DO UPDATE
+        SET numof_microareas = EXCLUDED.numof_microareas;
     """).format(sql.Identifier(table_name))
-    cur.execute(insert_query, (numof,))
+
+    cur.execute(upsert_query, (macroarea_id, numof))
 
 
 def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
@@ -49,11 +52,12 @@ def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
     Loads the bounding box data of microareas into a PostgreSQL table.
 
     For the given macroarea index `i`, this function:
-    - Creates a table named `macro_area_i` if it doesn't exist.
-    - Inserts the bounding box coordinates of each microarea into the table.
+    - Creates a table named `macroarea_A{i}` if it doesn't exist.
+    - Inserts the bounding box coordinates of each microarea into the table,
+      assigning microarea IDs like 'A{i}-M1', 'A{i}-M2', ...
 
     The table includes:
-    - `micro_area_num`: auto-incremented primary key.
+    - `microarea_id`: textual primary key (e.g., 'A1-M1')
     - `min_long`, `min_lat`, `max_long`, `max_lat`: bounding box coordinates.
 
     Args:
@@ -61,45 +65,49 @@ def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
                                      Each value is expected to be a tuple/list of (min_long, min_lat, max_long, max_lat).
         i (int): Index of the macroarea used to name the table.
     """
-    # Connect to the PostgreSQL database
     try:
         conn = connect_to_db()
         cur = conn.cursor()
 
-        # Create table for the macroarea if it doesn't already exist
-        table_name = f"macro_area_{i}"
+        table_name = f"macroarea_A{i}"
+
+        # Create the table for the macroarea
         cur.execute(sql.SQL("""
             CREATE TABLE IF NOT EXISTS {} (
-                micro_area_num SERIAL PRIMARY KEY,
+                microarea_id TEXT PRIMARY KEY,
                 min_long FLOAT,
                 min_lat FLOAT,
                 max_long FLOAT,
                 max_lat FLOAT
-            );         
+            );
         """).format(sql.Identifier(table_name)))
-        
-        print(f"[INFO] Table macro_area_{i} created (if not exists).")
 
-        # Insert each microarea's bounding box into the table
+        print(f"[INFO] Table {table_name} created (if not exists).")
+
+        # Insert each microarea with formatted ID
         insert_query = sql.SQL("""
-            INSERT INTO {}(min_long, min_lat, max_long, max_lat)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO {}(microarea_id, min_long, min_lat, max_long, max_lat)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (microarea_id) DO UPDATE
+            SET min_long = EXCLUDED.min_long,
+                min_lat = EXCLUDED.min_lat,
+                max_long = EXCLUDED.max_long,
+                max_lat = EXCLUDED.max_lat
         """).format(sql.Identifier(table_name))
-        
-        for value in microareas_bbox_dict.values(): 
-            cur.execute(insert_query, (value[0], value[1], value[2], value[3]))
-        
+
+        for idx, value in enumerate(microareas_bbox_dict.values(), start=1):
+            microarea_id = f"A{i}-M{idx}"
+            cur.execute(insert_query, (microarea_id, value[0], value[1], value[2], value[3]))
+
         print(f"[INFO] Inserted {len(microareas_bbox_dict)} microareas.")
 
-        # Create or Update table to keep truck of the number of microareas
-        insert_numofmicro(len(microareas_bbox_dict), cur)
-
+        # Track the number of microareas
+        insert_numofmicro(i, len(microareas_bbox_dict), cur)
 
     except Exception as e:
-        print(f"[ERROR] Failed to load microareas for macro_area_{i}: {e}")
-    
+        print(f"[ERROR] Failed to load microareas for macroarea_A{i}: {e}")
+
     finally:
-        # Commit the transaction and close the connection
         conn.commit()
         cur.close()
         conn.close()

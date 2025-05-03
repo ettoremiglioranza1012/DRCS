@@ -113,59 +113,56 @@ def true_color_image_request_processing(aoi_bbox: BBox,
     return request_true_color
 
 
-def fetch_bbox_from_db(i: int) -> tuple | None:
+def fetch_micro_bbox_from_db(i: int) -> tuple | None:
     """
     Retrieves the bounding box of a specific microarea within a macroarea from the database.
 
-    This function connects to the PostgreSQL database, looks up how many microareas are stored
-    for the given macroarea (identified by index `i`), and fetches the bounding box
-    (min_long, min_lat, max_long, max_lat) of one of its microareas.
-
-    Note:
-        Currently, the function selects a microarea at random for demonstration purposes.
-        In a full implementation, this should be replaced with a deterministic selection
-        (e.g., based on input parameters, spatial query, or area of interest).
-
     Args:
-        i (int): The index of the macroarea whose microareas are stored in the database.
+        i (int): The index of the macroarea (e.g., 1 for 'A1').
 
     Returns:
         tuple or None: A tuple of (min_long, min_lat, max_long, max_lat) if a bounding box is found,
-                       or None if the macroarea does not exist in the metadata table
-                       of None if the microarea does not exist in the data table.
+                       or None if the macroarea or microarea does not exist.
     """
     conn = connect_to_db()
     cur = conn.cursor()
 
-    # Fecth a random bounding box from the database for the current macroarea
+    macroarea_id = f"A{i}"
+    table_name = f"macroarea_{macroarea_id}"
+
+    # Step 1: Retrieve number of microareas from n_microareas
     cur.execute(sql.SQL("""
         SELECT numof_microareas 
         FROM n_microareas
-        WHERE macro_area_num = %s             
-    """), (i,))
+        WHERE macroarea_id = %s             
+    """), (macroarea_id,))
 
-    n_microareas= cur.fetchone()
-    if n_microareas is None:
-        return None  # No such macro_area_num in the table
+    result = cur.fetchone()
+    if result is None:
+        return None  # No such macroarea_id in summary table
 
-    n_example = random.randint(1, n_microareas[0])
+    n_microareas = result[0]
 
-    table_name = f"macro_area_{i}"
-    example_query = sql.SQL("""
+    # Step 2: Choose a random microarea index
+    n_example = random.randint(1, n_microareas)
+    microarea_id = f"{macroarea_id}-M{n_example}"
+
+    # Step 3: Fetch bounding box from microarea table
+    cur.execute(sql.SQL("""
         SELECT min_long, min_lat, max_long, max_lat
         FROM {}
-        WHERE micro_area_num = %s
-    """).format(sql.Identifier(table_name))
+        WHERE microarea_id = %s
+    """).format(sql.Identifier(table_name)), (microarea_id,))
 
-    cur.execute(example_query, (n_example,))
-    fetch_bbox = cur.fetchone()
-    if fetch_bbox is None:
-        return None # No such micro_area_num in the table 
+    bbox = cur.fetchone()
 
     cur.close()
     conn.close()
-    
-    return fetch_bbox
+
+    if bbox is None:
+        return None  # microarea_id not found
+
+    return bbox
 
 
 def process_image(requested_data):

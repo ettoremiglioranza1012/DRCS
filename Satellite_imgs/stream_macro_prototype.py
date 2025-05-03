@@ -1,12 +1,13 @@
 
 # Utilities
 from sentinelhub import SHConfig
+from kafka import KafkaProducer
 
 from imgfetch_utils import (
     get_aoi_bbox_and_size,
     true_color_image_request_processing,
     process_image,
-    fetch_bbox_from_db
+    fetch_micro_bbox_from_db
     )   
 
 def stream_macro1():
@@ -18,7 +19,7 @@ def stream_macro1():
 
     while stream:
         # Fetch bbox example for macroarea
-        microarea_example_bbox = fetch_bbox_from_db(i)
+        microarea_example_bbox = fetch_micro_bbox_from_db(i)
         if microarea_example_bbox is None:
             print(f"[ERROR] No bounding box found for macroarea {i}, skipping.")
             break
@@ -41,7 +42,6 @@ def stream_macro1():
                                                                  config,
                                                                  start_time,
                                                                  end_time)
-        
         # Fetch data
         true_color_imgs = request_true_color.get_data()
         if not true_color_imgs:
@@ -51,11 +51,10 @@ def stream_macro1():
         print(f"[INFO] Returned data is of type = {type(true_color_imgs)} and length {len(true_color_imgs)}.")
         print(f"[INFO] Single element in the list is of type {type(true_color_imgs[-1])} and has shape {true_color_imgs[-1].shape}")
         img_payload_kafka_ready = process_image(true_color_imgs)
-        
-        print("[DEBUG] Output of producers -> \n\n")
 
-        print(type(img_payload_kafka_ready))
-        print("---\n\n")
+        # Initialize Kafka
+        producer = KafkaProducer(boostrap_severs=['localhost:1234'])
+
 
 
 if __name__ == "__main__":

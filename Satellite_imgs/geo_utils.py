@@ -254,7 +254,7 @@ def plot_image(image: np.ndarray, factor: float = 3.5/255, clip_range: Tuple[flo
                         Satellite images often need rescaling because of what they measure.
                         For example, factor=3.5/255 maps raw values in [0, 255] to approx [0, 3.5].
         clip_range (Tuple[float, float]): Range to clip the rescaled pixel values to (e.g., (0, 1)),
-                                          for proper display using matplotlib or saving.
+                                          for proper display using matplotlib.
 
     Returns:
         None
