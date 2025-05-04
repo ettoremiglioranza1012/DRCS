@@ -147,7 +147,7 @@ def process_macroareas():
 
     This function is intended to be run once as part of the initial geodata ingestion phase.
     """
-    n_of_macroareas = 7
+    n_of_macroareas = 5
     for i in range(1, n_of_macroareas + 1):
 
         print(f"[INFO] Processing macroarea {i}...")

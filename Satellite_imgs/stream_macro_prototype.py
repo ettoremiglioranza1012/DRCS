@@ -53,7 +53,7 @@ def stream_macro1():
         img_payload_kafka_ready = process_image(true_color_imgs)
 
         # Initialize Kafka
-        producer = KafkaProducer(boostrap_severs=['localhost:1234'])
+        #producer = KafkaProducer(boostrap_severs=['localhost:1234'])
 
 
 
