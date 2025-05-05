@@ -4,13 +4,22 @@ import matplotlib.pyplot as plt
 from typing import Dict, Tuple
 from PIL import Image
 import numpy as np
+import logging
 import base64
+import time
 import math
 import json
 import io
 
 
-# |---Utils functions---|
+# Logs Configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(asctime)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 
 def read_json(macroarea_input_path: str) -> Dict:
     """
@@ -177,6 +186,7 @@ def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
     Returns:
         bytes: The compressed image in JPEG format as a byte stream.
     """
+    start_time = time.perf_counter()
     # Run some tests
     assert img.ndim == 3 and img.shape[2] == 3, "[ERROR] Input image must be (H, W, 3)"
     assert img.min() >= 0 and img.max() <= 255, "[ERROR] Image values must be in range [0, 255]"
@@ -184,7 +194,7 @@ def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
     if not isinstance(img, np.ndarray):
         raise ValueError("[ERROR]Input type is not np.ndarray")
     
-    print(f"[INFO] Compressing image of shape {img.shape} with quality={quality}...")
+    logger.info(f"Compressing image of shape {img.shape} with quality={quality}...")
 
     # Ensure the image is in 8-bit unsigned integer format and convert to a PIL image
     pil_img = Image.fromarray(img.astype('uint8'), 'RGB')
@@ -197,7 +207,8 @@ def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
 
     # Print size
     compressed_size = buffer.tell()
-    print(f"[INFO] Compression complete. Compressed size: {compressed_size} bytes")
+    elapsed = time.perf_counter() - start_time
+    logger.info(f"Compression complete. Compressed size: {compressed_size} bytes in {elapsed:.3f} s")
 
     # Return the byte content of the compressed image
     return buffer.getvalue()
@@ -214,6 +225,7 @@ def serialize_image_payload(image_bytes: bytes, metadata: dict) -> str:
     Returns:
         str: JSON string with base64-encoded image and associated metadata.
     """
+    start_time = time.perf_counter()
     # Run some tests
     if not isinstance(image_bytes, bytes):
         raise ValueError("[ERROR] image_bytes must be of type bytes")
@@ -221,7 +233,7 @@ def serialize_image_payload(image_bytes: bytes, metadata: dict) -> str:
     if not isinstance(metadata, dict):
         raise ValueError("[ERROR] metadata must be a dictionary")
 
-    print(f"[INFO] Serializing image of size {len(image_bytes)} bytes...")
+    logger.info(f"Serializing image of size {len(image_bytes)} bytes...")
     
     # Encode image bytes into base64 to safely embed in JSON
     encoded = base64.b64encode(image_bytes).decode('utf-8')
@@ -235,7 +247,8 @@ def serialize_image_payload(image_bytes: bytes, metadata: dict) -> str:
     # Convert dict to json 
     json_str = json.dumps(payload)
 
-    print(f"[INFO] Serialization complete. Payload size: {len(json_str)} characters")
+    elapsed = time.perf_counter() - start_time
+    logger.info(f"Serialization complete. Payload size: {len(json_str)} characters in {elapsed:.3f} s\n")
 
     # Convert the payload dictionary into a JSON string
     return json_str

@@ -1,7 +1,11 @@
 
 # Utilities
-import random
+from imgfilter_utils import filter_image
 from psycopg2 import sql
+import logging
+import random
+
+
 from db_utils import connect_to_db
 
 from geo_utils import (
@@ -23,7 +27,14 @@ from sentinelhub import (
 )
 
 
-# |--- UTILITY FUNCTIONS FOR SENTINEL REQUESTS ---|
+# Logs Configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(asctime)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 
 def get_aoi_bbox_and_size(bbox: list, resolution: int = 10) -> tuple:
     """
@@ -45,7 +56,7 @@ def get_aoi_bbox_and_size(bbox: list, resolution: int = 10) -> tuple:
     """
     aoi_bbox = BBox(bbox=bbox, crs=CRS.WGS84)
     aoi_size = bbox_to_dimensions(aoi_bbox, resolution=resolution)
-    print(f"[INFO] Image shape at {resolution} m resolution: {aoi_size} pixels")
+    logger.info(f"Image shape at {resolution} m resolution: {aoi_size} pixels")
 
     return aoi_bbox, aoi_size
 
@@ -170,9 +181,12 @@ def process_image(requested_data):
         print("No image data to display.")
         return
     image = requested_data[0]
+    
+    # Filter the image
+    filtered_img = filter_image(image)
 
     # Compress image with PIL
-    img_bytes = compress_image_with_pil(image)
+    img_bytes = compress_image_with_pil(filtered_img)
     
     # Meta data generator --> Gino's research
     metadata = dict()
@@ -180,7 +194,7 @@ def process_image(requested_data):
     # Serialize image to Json with fake metadata
     img_payload_prod = serialize_image_payload(img_bytes, metadata)
 
-    plot_image(image)
+    plot_image(filtered_img)
 
     return img_payload_prod
     

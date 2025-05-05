@@ -1,6 +1,7 @@
+
 # Utilities
 from kafka.admin import KafkaAdminClient, NewTopic
-from db_utils import connect_to_db
+from Satellite_imgs.db_utils import connect_to_db
 from psycopg2 import sql, OperationalError
 
 
@@ -37,13 +38,10 @@ def get_partitions(i: int) -> int:
         print("[ERROR] Error while executing query:", ex)
         raise
     finally:
-        try:
-            if cur:
-                cur.close()
-            if conn:
-                conn.close()
-        except:
-            pass
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
@@ -86,8 +84,20 @@ def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
         raise
 
 
-def kafka_cluster_config():
-    # Initialize Kafka admin client
+def kafka_cluster_config() -> None:
+    """
+    Connects to a Kafka cluster and creates a set of topics for satellite image ingestion,
+    with the number of partitions for each topic dynamically determined from the database
+    based on the number of microareas per macroarea.
+
+    This function performs the following steps:
+    - Initializes a Kafka admin client
+    - Retrieves the number of partitions needed for each macroarea from the database
+    - Creates one topic per macroarea (e.g., satellite_imgs_A1, A2, ...)
+    - Verifies that each topic was created with the correct number of partitions
+    """
+
+    # Init Kafka admin client
     admin = KafkaAdminClient(
         bootstrap_servers="localhost:29092",
         client_id="setup-script"
