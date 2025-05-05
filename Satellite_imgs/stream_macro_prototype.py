@@ -1,4 +1,6 @@
+
 # Utilities
+from kafka.errors import KafkaError
 from sentinelhub import SHConfig
 from kafka import KafkaProducer
 import logging
@@ -21,20 +23,126 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def stream_macro1():
+def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
+    """
+    Developer Notes: Message Durability and Design Choices
+    -------------------------------------------------------
+
+    Our disaster recovery system requires reliable, time-synchronized delivery of large satellite images.
+    To guarantee that **no image is lost or silently dropped**, we adopt the following Kafka producer strategies:
+
+    1. Why In-Sync Replicas (ISR) Matter:
+    - Each Kafka partition can have multiple replicas: 1 leader + N followers.
+    - Only followers that are fully up-to-date with the leader are considered "in-sync" (ISR).
+    - We want to ensure that **messages are not just written to the leader**, but also **replicated to at least one other broker**.
+    - In production, this ensures that **if a broker crashes, no data is lost**.
+
+    2. Why Synchronous Sends (`future.get()`):
+    - Kafka sends are asynchronous by default, which is high-performance but risky in critical systems.
+    - We use `.get(timeout=...)` to block the producer until Kafka confirms the message was received and written.
+    - This gives **immediate failure feedback** if something goes wrong (e.g., not enough ISRs, network issue).
+    - It ensures we don’t move on until we’re sure the image is safely persisted.
+
+    3. Why `acks='all'`:
+    - This setting waits for **all in-sync replicas** to confirm the write.
+    - It provides the strongest delivery guarantee Kafka supports.
+    - In production (with replication.factor=3+), this ensures that data is acknowledged by at least 2+ brokers (given min.insync.replicas=2+).
+    - In development (single broker), it behaves like `acks='1'` but prepares the system for stronger consistency when scaled.
+
+    4. Why `retries=5`:
+    - Transient errors like leader reelection, broker unavailability, or network glitches may cause temporary send failures.
+    - By configuring `retries=5`, the producer will automatically attempt to resend a failed message up to 5 times **before giving up**.
+    - This significantly improves robustness under load or during broker transitions, without requiring manual retry logic.
+    - Retried sends still respect `acks='all'` and ISR guarantees — meaning no compromise on consistency.
+
+    Kafka Producer Configuration Notes
+    ----------------------------------
+
+    This code uses `acks='all'` to ensure strong delivery guarantees.
+    While prototyping on a single broker, this setup is safe and valid.
+
+    Current Development Setup:
+    - Brokers: 1
+    - replication.factor = 1
+    - min.insync.replicas = 1 (default)
+    - acks = 'all' behaves like acks = '1' (only the leader exists)
+    - Synchronous send (`future.get()`) ensures message delivery or raises exception
+
+    Future Production Setup (Scalable):
+    - Brokers: 3+
+    - replication.factor = 3+
+    - min.insync.replicas = 2+
+    - acks = 'all' ensures write is replicated to at least 2+ brokers
+    - Protects against data loss if one broker crashes
+    - No code changes needed (at least not here) — same producer config becomes stronger automatically
+
+    Note:
+    Avoid overriding `min.insync.replicas` in development if using default broker configs.
+    Just document the intent and apply topic-level configs at deployment time.
+    """
+    producer = KafkaProducer(
+        bootstrap_servers=bootstrap_servers,
+        acks='all',
+        retries=5,
+        value_serializer=lambda v: v.encode('utf8') # encoding str in bytes
+    )
+
+    return producer
+
+
+def send_message_to_kafka(message_payload: str, topic: str, producer: KafkaProducer, microarea_id: str) -> None:
+    """
+    Sends a message to the given Kafka topic and waits for confirmation.
+
+    Assumes:
+    - message_payload is a JSON string.
+    - The KafkaProducer is configured with a value_serializer that encodes the string to bytes.
+    - acks='all' and retries are already set on the producer.
+
+    Includes:
+    - Synchronous blocking send with .get(timeout=30)
+    - Logs success or failure with partition and offset info
+    """
+    try:
+        key = microarea_id.encode('utf8')
+        future = producer.send(topic, key=key, value=message_payload)
+        record_metadata = future.get(timeout=15) # timeout in s;
+        logger.info(f"[KAFKA] Message sent to topic '{record_metadata.topic}', "
+                    f"partition {record_metadata.partition}, offset {record_metadata.offset}")
+    
+    except KafkaError as e:
+        logger.exception("[KAFKA ERROR] Failed to send message to Kafka after retries.")
+        # fallback mechanism?
+    
+    except Exception as e:
+        logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
+
+
+def stream_macro_prototype():
+
+    # Initialize SentinelHub Client
     config = SHConfig()
-    i = 5
-    stream = True
+    
+    # Initialize Kafka Producer
+    boostrap_servers = ['localhost:29092']
+    producer = create_producer(boostrap_servers=boostrap_servers)
+
+    # Set up data stream parameter
+    i = 5                       # Macroarea reference
+    stream = True               # Stream until False
+    iteration_time = None       # Default Iteration time
+    start_time = "2024-05-01"   # Date interval
+    end_time = "2024-05-20"     # Date interval
+
     print("\n")
     logger.info(f"Streaming data for macroarea_A{i}...\n")
-    iteration_time = None
 
     while stream:
         try:
             t_macro_start = time.perf_counter()
 
             logger.info("Fetching bounding box from DB...")
-            microarea_example_bbox = fetch_micro_bbox_from_db(i)
+            microarea_example_bbox, microarea_example_id = fetch_micro_bbox_from_db(i)
             if microarea_example_bbox is None:
                 logger.error(f"No bounding box found for macroarea {i}, skipping.")
                 break
@@ -46,10 +154,6 @@ def stream_macro1():
             curr_aoi_bbox, curr_aoi_size = get_aoi_bbox_and_size(
                 curr_aoi_coords_wgs84, resolution=10)
             logger.info("BBox ready in %.2f s", time.perf_counter() - t_bbox)
-
-            # Date interval
-            start_time = "2024-05-01"
-            end_time = "2024-05-20"
 
             logger.info("Building SentinelHub request...")
             t_req = time.perf_counter()
@@ -75,6 +179,12 @@ def stream_macro1():
             iteration_time = time.perf_counter() - t_macro_start
             logger.info("Total macroarea cycle time: %.2f s", iteration_time)
 
+            # Developing...
+            topic = f"satellite_imgs_A{i}"
+            t_send = time.perf_counter()
+            send_message_to_kafka(img_payload_str, topic, producer, microarea_example_id)
+            logger.info("Message sent in %.2f s", time.perf_counter() - t_send)
+
         except Exception as e:
             logger.error("Error occured during streaming cycle: %s", str(e))
             logger.warning("Skip to next fetch...")
@@ -92,13 +202,7 @@ def stream_macro1():
                 logger.info("Waiting %.2f s before next image fetching...\n\n", remaining_time)
                 time.sleep(remaining_time)
 
-        # Uncomment this if/when Kafka is integrated
-        """
-        producer = KafkaProducer(bootstrap_servers=['localhost:29092'])
-        value = img_payload_str.encode('utf8')
-        future = producer.send(f'satellite_imgs_A{i}', value=value)
-        """
 
 if __name__ == "__main__":
-    stream_macro1()
+    stream_macro_prototype()
 

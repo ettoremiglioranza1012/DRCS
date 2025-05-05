@@ -1,12 +1,10 @@
 
 # Utilities
 from imgfilter_utils import filter_image
+from db_utils import connect_to_db
 from psycopg2 import sql
 import logging
 import random
-
-
-from db_utils import connect_to_db
 
 from geo_utils import (
     compress_image_with_pil,
@@ -171,9 +169,9 @@ def fetch_micro_bbox_from_db(i: int) -> tuple | None:
     conn.close()
 
     if bbox is None:
-        return None  # microarea_id not found
+        raise ValueError(f"[ERROR] No bounding box found for microarea '{microarea_id}' in table '{table_name}'. This indicates a data integrity issue in your DB population process.")
 
-    return bbox
+    return bbox, microarea_id
 
 
 def process_image(requested_data):
