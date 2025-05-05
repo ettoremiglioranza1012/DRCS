@@ -67,7 +67,7 @@ def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
 
         for topic_meta in topics_metadata:
             topic = topic_meta['topic']
-            actual_count = len(topic_meta['partitions'])  
+            actual_count = len(topic_meta['partitions']) 
             expected_count = expected_partitions[topic]    
 
             if actual_count != expected_count:
@@ -110,7 +110,7 @@ def kafka_cluster_config():
     
     try:
         # Create topics
-        #admin.create_topics(new_topics=topic_list, validate_only=False, timeout_ms=120000)
+        admin.create_topics(new_topics=topic_list, validate_only=False, timeout_ms=120000)
         print(f"[INFO] Successfully created {n_macros} topics.")
 
         # Expected partition mapping
