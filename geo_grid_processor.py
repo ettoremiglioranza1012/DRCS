@@ -3,9 +3,9 @@
 import os
 import psycopg2
 from psycopg2 import sql
-from db_utils import connect_to_db
+from Utils.db_utils import connect_to_db
 
-from geo_utils import (
+from Utils.geo_utils import (
     read_json,
     write_json,
     polygon_to_bbox,
@@ -125,7 +125,7 @@ def macrogrid_reconstruction(microareas_bbox_dict: dict, i: int) -> None:
         microareas_bbox_dict (dict): Dictionary containing bounding boxes of microareas.
         i (int): The macroarea index used to name the output file.
     """
-    path = "Satellite_imgs/Macro_output"
+    path = "Macro_data/Macro_output"
     os.makedirs(path, exist_ok=True)
     macrogrid_outcome_polygon = dict_to_polygon(microareas_bbox_dict)
     macrogrid_outcome_path = f"{path}/macroarea_{i}.json"
@@ -153,7 +153,7 @@ def process_macroareas():
         print(f"[INFO] Processing macroarea {i}...")
 
         # Read macroarea geometry from file
-        path_to_current_geoJson_macro = f"Satellite_imgs/Macro_input/macroarea_{i}.json"
+        path_to_current_geoJson_macro = f"Macro_data/Macro_input/macroarea_{i}.json"
         if not os.path.exists(path_to_current_geoJson_macro):
             print(f"[WARNING] File not found: {path_to_current_geoJson_macro}")
             continue
@@ -170,7 +170,7 @@ def process_macroareas():
         # Load microareas into PostgreSQL database
         grids_loading(microareas_bbox_dict, i)
 
-    n_reconstructed = len([f for f in os.listdir("Satellite_imgs/Macro_output") if f.endswith(".json")])
+    n_reconstructed = len([f for f in os.listdir("Macro_data/Macro_output") if f.endswith(".json")])
     print(f"\n[INFO] Reconstructed {n_reconstructed} macrogrids successfully.")
 
 

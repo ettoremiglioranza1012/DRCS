@@ -1,7 +1,7 @@
 
 # Utilities
 from kafka.admin import KafkaAdminClient, NewTopic
-from Satellite_imgs.db_utils import connect_to_db
+from Utils.db_utils import connect_to_db
 from psycopg2 import sql, OperationalError
 
 

@@ -84,7 +84,8 @@ def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
         bootstrap_servers=bootstrap_servers,
         acks='all',
         retries=5,
-        value_serializer=lambda v: v.encode('utf8') # encoding str in bytes
+        max_request_size=2000000,   # Some imgs have more than default 1 MB (1048576 bytes) -> override the default;
+        value_serializer=lambda v: v.encode('utf8')
     )
 
     return producer
@@ -98,9 +99,10 @@ def send_message_to_kafka(message_payload: str, topic: str, producer: KafkaProdu
     - message_payload is a JSON string.
     - The KafkaProducer is configured with a value_serializer that encodes the string to bytes.
     - acks='all' and retries are already set on the producer.
+    - Hash microarea_id retrived from database to identify partition. 
 
     Includes:
-    - Synchronous blocking send with .get(timeout=30)
+    - Synchronous blocking send with .get(timeout=15)
     - Logs success or failure with partition and offset info
     """
     try:
@@ -118,33 +120,68 @@ def send_message_to_kafka(message_payload: str, topic: str, producer: KafkaProdu
         logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
 
 
-def stream_macro_prototype():
+def stream_macro_prototype(macroarea_i:int) -> None:
+    """
+    Streams satellite image data for a given macroarea and publishes it to a Kafka topic.
 
+    Context:
+    --------
+    This function is part of a disaster recovery and coordination system designed to
+    collect, process, and transmit high-resolution satellite imagery in near real-time.
+    Each macroarea consists of several microareas for which we regularly acquire satellite
+    images. These are compressed, serialized, and sent to a Kafka topic for downstream
+    processing, alerting, or dashboard visualization.
+
+    Function Workflow:
+    ------------------
+    1. Initializes Sentinel Hub configuration and a Kafka producer with strong delivery guarantees.
+    2. Fetches the coordinates (bounding box) of a ***random*** microarea from the given macroarea.
+    3. Converts the bounding box into sentinelHub objects suitable for Sentinel Hub API.
+    4. Submits a request to Sentinel Hub to fetch the latest true-color image data.
+    5. Applies processing to simulate a disaster overlay (e.g., fire).
+    6. Compresses and serializes the image into a Base64-encoded JSON payload.
+    7. Sends the serialized image to the appropriate Kafka topic partitioned by microarea ID (hashed key is db's table primary key).
+    8. Repeats the process every X (e.g. 60 s) seconds to simulate a continuous image stream.
+
+    Parameters:
+    -----------
+    macroarea_i : int
+        The numeric ID of the macroarea (e.g., 1 to 5) used to build topic names and fetch spatial data.
+
+    Notes:
+    ------
+    - Kafka delivery is synchronous and blocking (via `future.get()`), ensuring guaranteed write acknowledgment.
+    - The topic is expected to be named like 'satellite_imgs_A{macroarea_i}' and pre-created with partitions.
+    - The loop will wait for the remainder of a X-second interval to maintain consistent image intervals.
+    - This function is designed to run indefinitely unless an error or empty image response occurs.
+    """
+    
     # Initialize SentinelHub Client
     config = SHConfig()
     
     # Initialize Kafka Producer
-    boostrap_servers = ['localhost:29092']
-    producer = create_producer(boostrap_servers=boostrap_servers)
+    bootstrap_servers = ['localhost:29092']
+    print("\n[STREAM-PROCESS]\n")
+    logger.info("Connecting to Kafka client to initialize producer...")
+    producer = create_producer(bootstrap_servers=bootstrap_servers)
 
-    # Set up data stream parameter
-    i = 5                       # Macroarea reference
+    # Set up data stream parameters
     stream = True               # Stream until False
     iteration_time = None       # Default Iteration time
     start_time = "2024-05-01"   # Date interval
     end_time = "2024-05-20"     # Date interval
 
     print("\n")
-    logger.info(f"Streaming data for macroarea_A{i}...\n")
+    logger.info(f"Streaming data for macroarea_A{macroarea_i}...\n")
 
     while stream:
         try:
             t_macro_start = time.perf_counter()
 
             logger.info("Fetching bounding box from DB...")
-            microarea_example_bbox, microarea_example_id = fetch_micro_bbox_from_db(i)
+            microarea_example_bbox, microarea_example_id = fetch_micro_bbox_from_db(macroarea_i)
             if microarea_example_bbox is None:
-                logger.error(f"No bounding box found for macroarea {i}, skipping.")
+                logger.error(f"No bounding box found for macroarea {macroarea_i}, skipping.")
                 break
 
             curr_aoi_coords_wgs84 = list(microarea_example_bbox)
@@ -175,34 +212,30 @@ def stream_macro_prototype():
             t_proc = time.perf_counter()
             img_payload_str = process_image(true_color_imgs)
             logger.info("Image processed in %.2f s", time.perf_counter() - t_proc)
-            
+
+            topic = f"satellite_imgs_A{macroarea_i}"
+            logger.info("Sending payload to Kafka...")
+            t_send = time.perf_counter()
+            send_message_to_kafka(img_payload_str, topic, producer, microarea_example_id)
+            logger.info("Sending procedure closed in %.2f s\n", time.perf_counter() - t_send)
+
             iteration_time = time.perf_counter() - t_macro_start
             logger.info("Total macroarea cycle time: %.2f s", iteration_time)
 
-            # Developing...
-            topic = f"satellite_imgs_A{i}"
-            t_send = time.perf_counter()
-            send_message_to_kafka(img_payload_str, topic, producer, microarea_example_id)
-            logger.info("Message sent in %.2f s", time.perf_counter() - t_send)
-
         except Exception as e:
-            logger.error("Error occured during streaming cycle: %s", str(e))
+            logger.error("Error occurred during streaming cycle: %s", str(e))
             logger.warning("Skip to next fetch...")
             continue
         
         finally:
-            min_cycle_duration = 60 # seconds
+            min_cycle_duration = 60  # seconds
             if iteration_time is None:
                 elapsed = time.perf_counter() - t_macro_start
             else:
                 elapsed = iteration_time
             
-            remaining_time = max(0, min_cycle_duration-elapsed)
+            remaining_time = max(0, min_cycle_duration - elapsed)
+            logger.info("Waiting %.2f s before next image fetching...\n\n", remaining_time)
             if remaining_time > 0:
-                logger.info("Waiting %.2f s before next image fetching...\n\n", remaining_time)
                 time.sleep(remaining_time)
-
-
-if __name__ == "__main__":
-    stream_macro_prototype()
 
