@@ -6,7 +6,7 @@ from psycopg2 import sql
 import logging
 import random
 
-from Utils.geo_utils import (
+from Utils.geo_img_utils import (
     compress_image_with_pil,
     serialize_image_payload,
     plot_image

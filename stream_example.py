@@ -11,3 +11,5 @@ def stream_example():
 
 if __name__ == "__main__":
     stream_example()
+
+# SATELLITE MISSING TIMESTAMP!

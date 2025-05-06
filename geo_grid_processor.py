@@ -4,8 +4,9 @@ import os
 import psycopg2
 from psycopg2 import sql
 from Utils.db_utils import connect_to_db
+from Utils.geo_sensor_utils import process_sensor_stations_microarea
 
-from Utils.geo_utils import (
+from Utils.geo_img_utils import (
     read_json,
     write_json,
     polygon_to_bbox,
@@ -30,21 +31,28 @@ def insert_numofmicro(i: int, numof: int, cur: psycopg2.extensions.cursor) -> No
     table_name = "n_microareas"
     macroarea_id = f"A{i}"
 
-    cur.execute(sql.SQL("""
-        CREATE TABLE IF NOT EXISTS {} (
-            macroarea_id TEXT PRIMARY KEY,
-            numof_microareas INTEGER
-        );
-    """).format(sql.Identifier(table_name)))
-    
-    upsert_query = sql.SQL("""
-        INSERT INTO {} (macroarea_id, numof_microareas)
-        VALUES (%s, %s)
-        ON CONFLICT (macroarea_id) DO UPDATE
-        SET numof_microareas = EXCLUDED.numof_microareas;
-    """).format(sql.Identifier(table_name))
+    try:
+        cur.execute(sql.SQL("""
+            CREATE TABLE IF NOT EXISTS {} (
+                macroarea_id TEXT PRIMARY KEY,
+                numof_microareas INTEGER
+            );
+        """).format(sql.Identifier(table_name)))
+        
+        upsert_query = sql.SQL("""
+            INSERT INTO {} (macroarea_id, numof_microareas)
+            VALUES (%s, %s)
+            ON CONFLICT (macroarea_id) DO UPDATE
+            SET numof_microareas = EXCLUDED.numof_microareas;
+        """).format(sql.Identifier(table_name))
 
-    cur.execute(upsert_query, (macroarea_id, numof))
+        cur.execute(upsert_query, (macroarea_id, numof))
+
+        print(f"[INFO] Correctly inserted number of microareas for macroarea_{macroarea_id} in n_microareas.")
+    
+    except Exception as e:
+        print(f"[ERROR] Failed to insert number of microareas for macroarea_{macroarea_id} in n_microareas, "
+              f"Error: {e}")
 
 
 def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
@@ -108,9 +116,12 @@ def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
         print(f"[ERROR] Failed to load microareas for macroarea_A{i}: {e}")
 
     finally:
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            if conn: conn.commit()
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception as e:
+            print(f"[WARNING] Final cleanup failed: {e}")
 
 
 def macrogrid_reconstruction(microareas_bbox_dict: dict, i: int) -> None:
@@ -132,6 +143,86 @@ def macrogrid_reconstruction(microareas_bbox_dict: dict, i: int) -> None:
     write_json(macrogrid_outcome_path, macrogrid_outcome_polygon)
     
     print(f"[INFO] Saved macrogrid GeoJSON for macroarea {i} to: {macrogrid_outcome_path}")
+
+
+def generate_sensor_stations(i: int) -> None:
+    """
+    For a given macroarea index `i`, this function:
+    - Retrieves the number of microareas in the macroarea from the dimension table `n_microareas`.
+    - Iterates through each microarea, fetches its bounding box coordinates from the corresponding table.
+    - Calls `process_sensor_stations_microarea` to populate a separate sensor station table for each microarea.
+    - Handles database connection and commits changes at the end.
+
+    Args:
+        i (int): Index of the macroarea to process (e.g., 1 for A1)
+
+    Returns:
+        None
+    """
+    try:
+        conn = connect_to_db()
+        cur = conn.cursor()
+
+        macroarea_id = f"A{i}"
+        table_name = f"macroarea_A{i}"
+        print(f"\n[INFO] Starting generation of sensor stations for macroarea {macroarea_id}.")
+
+        # Fetch number of microareas for this macroarea from tracking table
+        cur.execute("""
+            SELECT numof_microareas
+            FROM n_microareas
+            WHERE macroarea_id = %s
+        """, (macroarea_id,))
+        n = cur.fetchone()
+        if not n:
+            raise SystemError(f"No microareas found for {macroarea_id}, check data integrity.")
+
+        num_microareas = n[0]
+        print(f"[INFO] Found {num_microareas} microareas in macroarea {macroarea_id}.")
+
+        # Loop over all microareas
+        for j in range(num_microareas):
+            temp_microid = f"A{i}-M{j+1}"
+            print(f"[INFO] Processing microarea {temp_microid}...")
+
+            # Select the bounding box of the microarea
+            select_query = sql.SQL("""
+                SELECT
+                    microarea_id,
+                    min_long,
+                    min_lat,
+                    max_long,
+                    max_lat
+                FROM {table}
+                WHERE microarea_id = %s
+            """).format(
+                table=sql.Identifier(table_name)
+            )
+
+            cur.execute(select_query, (temp_microid,))
+            result = cur.fetchone()
+
+            if result:
+                process_sensor_stations_microarea(result, cur)
+            else:
+                raise ValueError(f"Microarea {temp_microid} not found in {table_name}, check data integrity.")
+
+        print(f"[INFO] Successfully completed sensor station generation for macroarea {macroarea_id}.")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to generate and load sensor stations for macroarea {macroarea_id}: {e}")
+
+    finally:
+        try:
+            if conn:
+                conn.commit()
+                print(f"[INFO] Committed changes to the database for macroarea {macroarea_id}.")
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+        except Exception as e:
+            print(f"[WARNING] Final cleanup failed: {e}")
 
 
 def process_macroareas():
@@ -169,6 +260,11 @@ def process_macroareas():
 
         # Load microareas into PostgreSQL database
         grids_loading(microareas_bbox_dict, i)
+
+        print("\nInitializing sensors stations for the current macro area...")
+
+        # Randomly generate sensor stations location on microareas grid
+        generate_sensor_stations(i)
 
     n_reconstructed = len([f for f in os.listdir("Macro_data/Macro_output") if f.endswith(".json")])
     print(f"\n[INFO] Reconstructed {n_reconstructed} macrogrids successfully.")
