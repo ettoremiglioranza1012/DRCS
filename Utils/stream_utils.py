@@ -6,7 +6,7 @@ from kafka import KafkaProducer
 import logging
 import time
 
-from imgfetch_utils import (
+from Utils.imgfetch_utils import (
     get_aoi_bbox_and_size,
     true_color_image_request_processing,
     process_image,

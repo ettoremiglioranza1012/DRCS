@@ -1,12 +1,12 @@
 
 # Utilities
-from imgfilter_utils import filter_image
-from db_utils import connect_to_db
+from Utils.imgfilter_utils import filter_image
+from Utils.db_utils import connect_to_db
 from psycopg2 import sql
 import logging
 import random
 
-from geo_utils import (
+from Utils.geo_utils import (
     compress_image_with_pil,
     serialize_image_payload,
     plot_image
