@@ -62,8 +62,8 @@ def process_sensor_stations_microarea(
         print(f"[INFO] Creating sensor table `{sensor_table}` for microarea {microarea_id} with {num_stations} stations.")
 
         # Create the table to hold metadata for sensor stations in this microarea
-        cur.execute(sql.SQL(f"""
-            CREATE TABLE IF NOT EXISTS {sensor_table} (
+        cur.execute(sql.SQL("""
+            CREATE TABLE IF NOT EXISTS {} (
                 station_id TEXT PRIMARY KEY,
                 microarea_id TEXT,
                 latitude FLOAT,
@@ -80,7 +80,7 @@ def process_sensor_stations_microarea(
                 battery_type TEXT,
                 status TEXT
             );
-        """))
+        """).format(sql.Identifier(sensor_table)))
         print(f"[INFO] Table `{sensor_table}` created or already exists.")
 
         # Create (if needed) the tracking table for number of sensor stations per microarea
