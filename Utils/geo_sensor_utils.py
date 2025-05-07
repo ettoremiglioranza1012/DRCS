@@ -1,7 +1,8 @@
-
 # Utilities
 import random
-from datetime import date, timedelta
+import os
+import json
+from datetime import date, timedelta, datetime
 from psycopg2 import sql
 import psycopg2
 
@@ -36,6 +37,42 @@ def random_date(start_year: int = 2022, end_year: int = 2025) -> date:
     return start + timedelta(days=random.randint(0, (end - start).days))
 
 
+def log_to_json(message: str, level: str = "INFO", log_file: str = "Macro_data/Macro_output/sensor_log.json") -> None:
+    """
+    Log a message to a JSON file with a timestamp and severity level.
+
+    This function appends structured log entries to a JSON file. If the file doesn't exist,
+    it creates one and starts a new list. If it exists, it loads the existing list,
+    appends the new log entry, and writes everything back.
+
+    Args:
+        message (str): The log message to record.
+        level (str): The severity level of the message ("INFO", "WARNING", "ERROR", etc.).
+        log_file (str): Path to the JSON file where logs are stored.
+
+    Returns:
+        None
+    """
+    log_entry = {
+        "timestamp": datetime.now().isoformat() + "Z",
+        "level": level,
+        "message": message
+    }
+    if not os.path.isfile(log_file):
+        with open(log_file, 'w') as f:
+            json.dump([log_entry], f, indent=4)
+    else:
+        with open(log_file, 'r+', encoding='utf-8') as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                data = []
+            data.append(log_entry)
+            f.seek(0)
+            json.dump(data, f, indent=4)
+            f.truncate()
+
+
 def process_sensor_stations_microarea(
     result: tuple[str, float, float, float, float], 
     cur: psycopg2.extensions.cursor
@@ -54,51 +91,67 @@ def process_sensor_stations_microarea(
     Returns:
         None
     """
+def process_sensor_stations_microarea(
+    result: tuple[str, float, float, float, float], 
+    cur: psycopg2.extensions.cursor,
+    macroarea_id: str,
+    micronum: str
+) -> None:
+    """
+    Generate a random number of sensor stations within a given microarea bounding box,
+    and insert their metadata into a dedicated PostgreSQL table.
+
+    Also tracks the number of sensor stations created per microarea in the 
+    'n_sens_stations' dimension table.
+    """
     try:
         microarea_id, min_long, min_lat, max_long, max_lat = result
         num_stations = random.randint(50, 100)
         sensor_table = f"sens_stations_{microarea_id.replace('-', '_')}"
+        log_to_json(f"Creating sensor table `{sensor_table}` for microarea {microarea_id} with {num_stations} stations.")
+        
+        # Create sensor table
+        try:
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
+                    station_id TEXT PRIMARY KEY,
+                    microarea_id TEXT,
+                    latitude FLOAT,
+                    longitude FLOAT,
+                    install_date DATE,
+                    model TEXT,
+                    temp_sens TEXT,
+                    hum_sens TEXT,
+                    co2_sens TEXT,
+                    pm25_sens TEXT,
+                    smoke_sens TEXT,
+                    ir_sens TEXT,
+                    elevation_m FLOAT,
+                    battery_type TEXT,
+                    status TEXT
+                );
+            """).format(sql.Identifier(sensor_table)))
+            log_to_json(f"Table `{sensor_table}` created or already exists.")
+        except Exception as e:
+            raise SystemError(f"Failed to create sensor table `{sensor_table}`: {e}")
 
-        print(f"[INFO] Creating sensor table `{sensor_table}` for microarea {microarea_id} with {num_stations} stations.")
+        # Create tracking table if not exists
+        try:
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS n_sens_stations (
+                    microarea_id TEXT PRIMARY KEY,
+                    macroarea_id TEXT,
+                    microarea_num TEXT,
+                    numof_sens_stations INTEGER
+                );
+            """))
+        except Exception as e:
+            raise SystemError(f"Failed to create tracking table `n_sens_stations`: {e}")
 
-        # Create the table to hold metadata for sensor stations in this microarea
-        cur.execute(sql.SQL("""
-            CREATE TABLE IF NOT EXISTS {} (
-                station_id TEXT PRIMARY KEY,
-                microarea_id TEXT,
-                latitude FLOAT,
-                longitude FLOAT,
-                install_date DATE,
-                model TEXT,
-                temp_sens TEXT,
-                hum_sens TEXT,
-                co2_sens TEXT,
-                pm25_sens TEXT,
-                smoke_sens TEXT,
-                ir_sens TEXT,
-                elevation_m FLOAT,
-                battery_type TEXT,
-                status TEXT
-            );
-        """).format(sql.Identifier(sensor_table)))
-        print(f"[INFO] Table `{sensor_table}` created or already exists.")
-
-        # Create (if needed) the tracking table for number of sensor stations per microarea
-        cur.execute(sql.SQL("""
-            CREATE TABLE IF NOT EXISTS n_sens_stations (
-                microarea_id TEXT PRIMARY KEY,
-                numof_sens_stations INTEGER
-            );
-        """))
-
-        # Insert each sensor station into the sensor_table
-        for k in range(num_stations):
-            station_id = f"S_{microarea_id}_{str(k+1).zfill(3)}"
-            lat = generate_random_coord(min_lat, max_lat)
-            lon = generate_random_coord(min_long, max_long)
-
-            cur.execute(sql.SQL(f"""
-                INSERT INTO {sensor_table} (
+        # Insert metadata for each sensor station
+        try:
+            insertion_query = sql.SQL("""
+                INSERT INTO {} (
                     station_id, microarea_id, latitude, longitude, install_date, model,
                     temp_sens, hum_sens, co2_sens, pm25_sens, smoke_sens, ir_sens,
                     elevation_m, battery_type, status
@@ -118,36 +171,50 @@ def process_sensor_stations_microarea(
                     elevation_m = EXCLUDED.elevation_m,
                     battery_type = EXCLUDED.battery_type,
                     status = EXCLUDED.status;
-            """), (
-                station_id,
-                microarea_id,
-                lat,
-                lon,
-                random_date(),
-                random.choice(["WildSense-3000", "EnviroNode-X", "FireWatch-Pro", "ForestSentinel", "PyroScan-MKII"]),
-                random.choice(["TempPro-A1", "HeatTrack-200", "T-SenseX", "ClimaWatch-3", "ThermoPlus"]),
-                random.choice(["HumidX-100", "MoistTrack", "AirSense-H2", "DHT22", "EnviroHum"]),
-                random.choice(["CO2Safe-50", "GasTrack-X", "CarbonIQ", "GreenAir-300", "AQM-CO2"]),
-                random.choice(["AirFine-25", "Dusty-X", "ClearAir-100", "PartTrack", "EnviroPM"]),
-                random.choice(["SmokeCheck", "FlameSniff", "SensoSmoke", "AlarmX", "SmkSensePro"]),
-                random.choice(["IRFlame-900", "ThermEye", "FlareSense", "PyroWatch", "HeatSig"]),
-                round(random.uniform(50, 800), 2),
-                random.choice(["Li-Ion", "Solar", "Grid Power"]),
-                "active"
-            ))
+            """).format(sql.Identifier(sensor_table))
 
-        print(f"[INFO] Inserted {num_stations} sensor stations into `{sensor_table}`.")
+            for k in range(num_stations):
+                station_id = f"S_{microarea_id}_{str(k+1).zfill(3)}"
+                lat = generate_random_coord(min_lat, max_lat)
+                lon = generate_random_coord(min_long, max_long)
+                cur.execute(insertion_query, (
+                    station_id,
+                    microarea_id,
+                    lat,
+                    lon,
+                    random_date(),
+                    random.choice(["WildSense-3000", "EnviroNode-X", "FireWatch-Pro", "ForestSentinel", "PyroScan-MKII"]),
+                    random.choice(["TempPro-A1", "HeatTrack-200", "T-SenseX", "ClimaWatch-3", "ThermoPlus"]),
+                    random.choice(["HumidX-100", "MoistTrack", "AirSense-H2", "DHT22", "EnviroHum"]),
+                    random.choice(["CO2Safe-50", "GasTrack-X", "CarbonIQ", "GreenAir-300", "AQM-CO2"]),
+                    random.choice(["AirFine-25", "Dusty-X", "ClearAir-100", "PartTrack", "EnviroPM"]),
+                    random.choice(["SmokeCheck", "FlameSniff", "SensoSmoke", "AlarmX", "SmkSensePro"]),
+                    random.choice(["IRFlame-900", "ThermEye", "FlareSense", "PyroWatch", "HeatSig"]),
+                    round(random.uniform(50, 800), 2),
+                    random.choice(["Li-Ion", "Solar", "Grid Power"]),
+                    "active"
+                ))
+            log_to_json(f"Inserted {num_stations} sensor stations into `{sensor_table}`.")
+        except Exception as e:
+            raise SystemError(f"Failed to insert sensor data into `{sensor_table}`: {e}")
 
-        # Track the number of stations created in the dimension table
-        cur.execute(sql.SQL("""
-            INSERT INTO n_sens_stations (microarea_id, numof_sens_stations)
-            VALUES (%s, %s)
-            ON CONFLICT (microarea_id) DO UPDATE
-            SET numof_sens_stations = EXCLUDED.numof_sens_stations;
-        """), (microarea_id, num_stations))
-
-        print(f"[INFO] Updated `n_sens_stations` for microarea {microarea_id} with {num_stations} stations.")
+        # Insert/update tracking info
+        try:
+            cur.execute(sql.SQL("""
+                INSERT INTO n_sens_stations (microarea_id, macroarea_id, microarea_num, numof_sens_stations)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (microarea_id) DO UPDATE SET
+                    macroarea_id = EXCLUDED.macroarea_id,
+                    microarea_num = EXCLUDED.microarea_num, 
+                    numof_sens_stations = EXCLUDED.numof_sens_stations;
+            """), (microarea_id, macroarea_id, micronum, num_stations))
+            log_to_json(f"Updated `n_sens_stations` for microarea {microarea_id} with {num_stations} stations.")
+        except Exception as e:
+            raise ValueError(f"Microarea `{microarea_id}` not found or inconsistent in `n_sens_stations`: {e}")
 
     except Exception as e:
+        log_to_json(f"Failed to process microarea {microarea_id}: {e}", level="WARNING")
         raise SyntaxError(f"[WARNING] Failed to process microarea {microarea_id}: {e}")
+
+
 

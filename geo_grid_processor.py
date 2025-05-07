@@ -142,7 +142,7 @@ def macrogrid_reconstruction(microareas_bbox_dict: dict, i: int) -> None:
     macrogrid_outcome_path = f"{path}/macroarea_{i}.json"
     write_json(macrogrid_outcome_path, macrogrid_outcome_polygon)
     
-    print(f"[INFO] Saved macrogrid GeoJSON for macroarea {i} to: {macrogrid_outcome_path}")
+    print(f"[INFO] Saved reconstructed macrogrid in GeoJSON for macroarea {i} to: {macrogrid_outcome_path}")
 
 
 def generate_sensor_stations(i: int) -> None:
@@ -165,7 +165,8 @@ def generate_sensor_stations(i: int) -> None:
 
         macroarea_id = f"A{i}"
         table_name = f"macroarea_A{i}"
-        print(f"\n[INFO] Starting generation of sensor stations for macroarea {macroarea_id}.")
+        print("---")
+        print(f"[INFO] Starting generation of sensor stations for macroarea {macroarea_id}.")
 
         # Fetch number of microareas for this macroarea from tracking table
         cur.execute("""
@@ -179,11 +180,13 @@ def generate_sensor_stations(i: int) -> None:
 
         num_microareas = n[0]
         print(f"[INFO] Found {num_microareas} microareas in macroarea {macroarea_id}.")
-
+        print(f"[INFO] Processing macroarea {macroarea_id}...")
+        print("[INFO] Generating sensor stations and saving data into database... Please wait.")
+        
         # Loop over all microareas
         for j in range(num_microareas):
+            temp_micronum = f"M{j+1}"
             temp_microid = f"A{i}-M{j+1}"
-            print(f"[INFO] Processing microarea {temp_microid}...")
 
             # Select the bounding box of the microarea
             select_query = sql.SQL("""
@@ -203,7 +206,7 @@ def generate_sensor_stations(i: int) -> None:
             result = cur.fetchone()
 
             if result:
-                process_sensor_stations_microarea(result, cur)
+                process_sensor_stations_microarea(result, cur, macroarea_id, temp_micronum)
             else:
                 raise ValueError(f"Microarea {temp_microid} not found in {table_name}, check data integrity.")
 
@@ -216,7 +219,7 @@ def generate_sensor_stations(i: int) -> None:
         try:
             if conn:
                 conn.commit()
-                print(f"[INFO] Committed changes to the database for macroarea {macroarea_id}.")
+                print(f"[INFO] Committed changes to the database for macroarea {macroarea_id}.\n")
             if cur:
                 cur.close()
             if conn:
@@ -238,10 +241,11 @@ def process_macroareas():
 
     This function is intended to be run once as part of the initial geodata ingestion phase.
     """
+    print("\n[GEO-GRID-PROCESSOR]")
     n_of_macroareas = 5
     for i in range(1, n_of_macroareas + 1):
-
-        print(f"[INFO] Processing macroarea {i}...")
+        
+        print(f"\n[INFO] Processing macroarea {i}...")
 
         # Read macroarea geometry from file
         path_to_current_geoJson_macro = f"Macro_data/Macro_input/macroarea_{i}.json"
@@ -254,6 +258,7 @@ def process_macroareas():
         # Generate microarea grid within macroarea bounding box
         macro_bbox = polygon_to_bbox(macro_geom)
         microareas_bbox_dict = create_microareas_grid(macro_bbox, 500, i)
+        print("[INFO] Microgrids generated sucessfully")
 
         # Save reconstructed macrogrid as GeoJSON for inspection or reuse
         macrogrid_reconstruction(microareas_bbox_dict, i)
@@ -261,13 +266,12 @@ def process_macroareas():
         # Load microareas into PostgreSQL database
         grids_loading(microareas_bbox_dict, i)
 
-        print("\nInitializing sensors stations for the current macro area...")
-
         # Randomly generate sensor stations location on microareas grid
         generate_sensor_stations(i)
-
+        
+    print(f"\n[INFO] The logs of sensor stations data in: Macro_data/Macro_output")
     n_reconstructed = len([f for f in os.listdir("Macro_data/Macro_output") if f.endswith(".json")])
-    print(f"\n[INFO] Reconstructed {n_reconstructed} macrogrids successfully.")
+    print(f"[INFO] Reconstructed {n_reconstructed} macrogrids successfully.")
 
 
 if __name__ == "__main__":
