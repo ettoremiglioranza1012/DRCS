@@ -19,7 +19,7 @@ def get_partitions(i: int) -> int:
         macroarea_id = f"A{i}"
         query_execute = sql.SQL("""
             SELECT numof_microareas
-            FROM n_microareas
+            FROM macroareas
             WHERE macroarea_id = {}
         """).format(sql.Literal(macroarea_id))
 

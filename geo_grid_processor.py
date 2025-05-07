@@ -15,74 +15,94 @@ from Utils.geo_img_utils import (
 )
 
 
-def insert_numofmicro(i: int, numof: int, cur: psycopg2.extensions.cursor) -> None:
+def macro_loading(
+    i: int, 
+    numof: int, 
+    cur: psycopg2.extensions.cursor,
+    macro_bbox: tuple[float, float, float, float]
+) -> None:
     """
-    Creates or updates a tracking table with the number of microareas for each macroarea.
+    Creates or updates the `Macroareas` table with metadata for a specific macroarea.
 
     This function:
-    - Ensures the existence of the `n_microareas` table, which stores the count of microareas per macroarea.
-    - Inserts or updates the record with the provided number of microareas.
+    - Ensures the existence of the `Macroareas` table, which stores information about each macroarea.
+    - Inserts or updates the record for macroarea A{i}, including its bounding box and the number of microareas it contains.
 
     Args:
         i (int): Index of the macroarea.
-        numof (int): Number of microareas in the current macroarea.
-        cur (psycopg2.extensions.cursor): Active cursor to execute SQL queries.
+        numof (int): Number of microareas within this macroarea.
+        cur (psycopg2.extensions.cursor): Active database cursor to execute SQL queries.
+        macro_bbox (tuple): A 4-tuple (min_long, min_lat, max_long, max_lat) representing the macroarea bounding box.
     """
-    table_name = "n_microareas"
+    table_name = "macroareas"
     macroarea_id = f"A{i}"
+    min_long, min_lat, max_long, max_lat = macro_bbox
 
     try:
+        print(f"[INFO] Update or create (if not exists) {table_name}.")
+        
         cur.execute(sql.SQL("""
             CREATE TABLE IF NOT EXISTS {} (
                 macroarea_id TEXT PRIMARY KEY,
+                min_long FLOAT,
+                min_lat FLOAT,
+                max_long FLOAT,
+                max_lat FLOAT,
                 numof_microareas INTEGER
             );
         """).format(sql.Identifier(table_name)))
         
         upsert_query = sql.SQL("""
-            INSERT INTO {} (macroarea_id, numof_microareas)
-            VALUES (%s, %s)
-            ON CONFLICT (macroarea_id) DO UPDATE
-            SET numof_microareas = EXCLUDED.numof_microareas;
+            INSERT INTO {} (macroarea_id, min_long, min_lat, max_long, max_lat, numof_microareas)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (macroarea_id) DO UPDATE SET
+                min_long = EXCLUDED.min_long,
+                min_lat = EXCLUDED.min_lat,
+                max_long = EXCLUDED.max_long,
+                max_lat = EXCLUDED.max_lat,
+                numof_microareas = EXCLUDED.numof_microareas;
         """).format(sql.Identifier(table_name))
 
-        cur.execute(upsert_query, (macroarea_id, numof))
+        cur.execute(upsert_query, (macroarea_id, min_long, min_lat, max_long, max_lat, numof))
 
-        print(f"[INFO] Correctly inserted number of microareas for macroarea_{macroarea_id} in n_microareas.")
+        print(f"[INFO] Correctly inserted macroarea_{macroarea_id} informations into table {table_name}.")
     
     except Exception as e:
         print(f"[ERROR] Failed to insert number of microareas for macroarea_{macroarea_id} in n_microareas, "
               f"Error: {e}")
 
 
-def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
+def grids_loading(
+    microareas_bbox_dict: dict, 
+    macro_bbox: tuple[float, float, float, float], 
+    i: int
+) -> None:
     """
-    Loads the bounding box data of microareas into a PostgreSQL table.
+    Loads microarea bounding boxes and registers them in the `Microareas` table.
 
     For the given macroarea index `i`, this function:
-    - Creates a table named `macroarea_A{i}` if it doesn't exist.
-    - Inserts the bounding box coordinates of each microarea into the table,
-      assigning microarea IDs like 'A{i}-M1', 'A{i}-M2', ...
-
-    The table includes:
-    - `microarea_id`: textual primary key (e.g., 'A1-M1')
-    - `min_long`, `min_lat`, `max_long`, `max_lat`: bounding box coordinates.
+    - Ensures the existence of the shared `Microareas` table.
+    - Inserts or updates the bounding box data of each microarea, assigning microarea IDs like 'A{i}-M1', 'A{i}-M2', etc.
+    - Each microarea record includes its corresponding macroarea ID and coordinates.
+    - Also calls `macro_loading` to update metadata for the parent macroarea, including its bounding box and microarea count.
 
     Args:
-        microareas_bbox_dict (dict): Dictionary with bounding boxes of microareas.
-                                     Each value is expected to be a tuple/list of (min_long, min_lat, max_long, max_lat).
-        i (int): Index of the macroarea used to name the table.
+        microareas_bbox_dict (dict): Dictionary of microarea bounding boxes, where each value is a 4-tuple 
+                                     (min_long, min_lat, max_long, max_lat).
+        macro_bbox (tuple): A 4-tuple (min_long, min_lat, max_long, max_lat) representing the bounding box of the macroarea.
+        i (int): Index of the macroarea used to generate identifiers.
     """
     try:
         conn = connect_to_db()
         cur = conn.cursor()
 
-        table_name = f"macroarea_A{i}"
+        table_name = f"microareas"
 
         # Create the table for the macroarea
         cur.execute(sql.SQL("""
             CREATE TABLE IF NOT EXISTS {} (
                 microarea_id TEXT PRIMARY KEY,
+                macroarea_id TEXT,
                 min_long FLOAT,
                 min_lat FLOAT,
                 max_long FLOAT,
@@ -90,27 +110,29 @@ def grids_loading(microareas_bbox_dict: dict, i: int) -> None:
             );
         """).format(sql.Identifier(table_name)))
 
-        print(f"[INFO] Table {table_name} created (if not exists).")
+        print(f"[INFO] Table {table_name} update or create (if not exists).")
 
         # Insert each microarea with formatted ID
         insert_query = sql.SQL("""
-            INSERT INTO {}(microarea_id, min_long, min_lat, max_long, max_lat)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO {}(microarea_id, macroarea_id, min_long, min_lat, max_long, max_lat)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (microarea_id) DO UPDATE
-            SET min_long = EXCLUDED.min_long,
+            SET macroarea_id = EXCLUDED.macroarea_id,
+                min_long = EXCLUDED.min_long,
                 min_lat = EXCLUDED.min_lat,
                 max_long = EXCLUDED.max_long,
                 max_lat = EXCLUDED.max_lat
         """).format(sql.Identifier(table_name))
 
+        temp_macroarea_id = f"A{i}"
         for idx, value in enumerate(microareas_bbox_dict.values(), start=1):
-            microarea_id = f"A{i}-M{idx}"
-            cur.execute(insert_query, (microarea_id, value[0], value[1], value[2], value[3]))
+            temp_microarea_id = f"A{i}-M{idx}"
+            cur.execute(insert_query, (temp_microarea_id, temp_macroarea_id, value[0], value[1], value[2], value[3]))
 
         print(f"[INFO] Inserted {len(microareas_bbox_dict)} microareas.")
 
         # Track the number of microareas
-        insert_numofmicro(i, len(microareas_bbox_dict), cur)
+        macro_loading(i, len(microareas_bbox_dict), cur, macro_bbox)
 
     except Exception as e:
         print(f"[ERROR] Failed to load microareas for macroarea_A{i}: {e}")
@@ -150,7 +172,7 @@ def generate_sensor_stations(i: int) -> None:
     For a given macroarea index `i`, this function:
     - Retrieves the number of microareas in the macroarea from the dimension table `n_microareas`.
     - Iterates through each microarea, fetches its bounding box coordinates from the corresponding table.
-    - Calls `process_sensor_stations_microarea` to populate a separate sensor station table for each microarea.
+    - Calls `process_sensor_stations_microarea` to populate a separate sensor station table.
     - Handles database connection and commits changes at the end.
 
     Args:
@@ -163,15 +185,53 @@ def generate_sensor_stations(i: int) -> None:
         conn = connect_to_db()
         cur = conn.cursor()
 
+        table_name = "stations"
+        # Create stations table
+        try:
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
+                    station_id TEXT PRIMARY KEY,
+                    microarea_id TEXT,
+                    latitude FLOAT,
+                    longitude FLOAT,
+                    install_date DATE,
+                    model TEXT,
+                    temp_sens TEXT,
+                    hum_sens TEXT,
+                    co2_sens TEXT,
+                    pm25_sens TEXT,
+                    smoke_sens TEXT,
+                    ir_sens TEXT,
+                    elevation_m FLOAT,
+                    battery_type TEXT,
+                    status TEXT
+                );
+            """).format(sql.Identifier(table_name)))
+            print(f"[INFO] Table `{table_name}` created or already exists.")
+        except Exception as e:
+            raise SystemError(f"Failed to create sensor table `{table_name}`: {e}")
+        
+        # Create tracking table if not exists
+        try:
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS n_sens_stations (
+                    microarea_id TEXT PRIMARY KEY,
+                    macroarea_id TEXT,
+                    numof_sens_stations INTEGER
+                );
+            """))
+        except Exception as e:
+            raise SystemError(f"Failed to create tracking table `n_sens_stations`: {e}")
+
+        # Process each macro area sensor generating and saving task
         macroarea_id = f"A{i}"
-        table_name = f"macroarea_A{i}"
         print("---")
         print(f"[INFO] Starting generation of sensor stations for macroarea {macroarea_id}.")
 
         # Fetch number of microareas for this macroarea from tracking table
         cur.execute("""
             SELECT numof_microareas
-            FROM n_microareas
+            FROM macroareas
             WHERE macroarea_id = %s
         """, (macroarea_id,))
         n = cur.fetchone()
@@ -185,7 +245,6 @@ def generate_sensor_stations(i: int) -> None:
         
         # Loop over all microareas
         for j in range(num_microareas):
-            temp_micronum = f"M{j+1}"
             temp_microid = f"A{i}-M{j+1}"
 
             # Select the bounding box of the microarea
@@ -196,19 +255,18 @@ def generate_sensor_stations(i: int) -> None:
                     min_lat,
                     max_long,
                     max_lat
-                FROM {table}
+                FROM microareas
                 WHERE microarea_id = %s
-            """).format(
-                table=sql.Identifier(table_name)
-            )
+            """)
 
+            # Execute query to retrive relative micro area info
             cur.execute(select_query, (temp_microid,))
             result = cur.fetchone()
 
             if result:
-                process_sensor_stations_microarea(result, cur, macroarea_id, temp_micronum)
+                process_sensor_stations_microarea(result, cur, macroarea_id)
             else:
-                raise ValueError(f"Microarea {temp_microid} not found in {table_name}, check data integrity.")
+                raise ValueError(f"Microarea {temp_microid} not found in `macroareas`, check data integrity.")
 
         print(f"[INFO] Successfully completed sensor station generation for macroarea {macroarea_id}.")
 
@@ -250,8 +308,7 @@ def process_macroareas():
         # Read macroarea geometry from file
         path_to_current_geoJson_macro = f"Macro_data/Macro_input/macroarea_{i}.json"
         if not os.path.exists(path_to_current_geoJson_macro):
-            print(f"[WARNING] File not found: {path_to_current_geoJson_macro}")
-            continue
+            raise ValueError(f"File not found: {path_to_current_geoJson_macro}")
 
         macro_geom = read_json(path_to_current_geoJson_macro)
         
@@ -264,7 +321,7 @@ def process_macroareas():
         macrogrid_reconstruction(microareas_bbox_dict, i)
 
         # Load microareas into PostgreSQL database
-        grids_loading(microareas_bbox_dict, i)
+        grids_loading(microareas_bbox_dict, macro_bbox, i)
 
         # Randomly generate sensor stations location on microareas grid
         generate_sensor_stations(i)

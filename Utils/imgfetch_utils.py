@@ -137,12 +137,12 @@ def fetch_micro_bbox_from_db(i: int) -> tuple | None:
     cur = conn.cursor()
 
     macroarea_id = f"A{i}"
-    table_name = f"macroarea_{macroarea_id}"
+    table_name = f"microareas"
 
     # Step 1: Retrieve number of microareas from n_microareas
     cur.execute(sql.SQL("""
         SELECT numof_microareas 
-        FROM n_microareas
+        FROM macroareas
         WHERE macroarea_id = %s             
     """), (macroarea_id,))
 

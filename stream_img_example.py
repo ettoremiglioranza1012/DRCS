@@ -1,6 +1,6 @@
 
 # Utilites
-from Utils.stream_utils import stream_macro_prototype
+from Utils.stream_img_utils import stream_macro_prototype
 
 
 def stream_example():
