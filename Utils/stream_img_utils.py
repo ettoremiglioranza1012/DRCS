@@ -120,7 +120,7 @@ def send_message_to_kafka(message_payload: str, topic: str, producer: KafkaProdu
         logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
 
 
-def stream_macro_prototype(macroarea_i:int) -> None:
+def stream_macro_imgs(macroarea_i:int) -> None:
     """
     Streams satellite image data for a given macroarea and publishes it to a Kafka topic.
 
@@ -155,13 +155,13 @@ def stream_macro_prototype(macroarea_i:int) -> None:
     - The loop will wait for the remainder of a X-second interval to maintain consistent image intervals.
     - This function is designed to run indefinitely unless an error or empty image response occurs.
     """
-    
+    print("\n[STREAM-PROCESS]\n")
+
     # Initialize SentinelHub Client
     config = SHConfig()
     
     # Initialize Kafka Producer
     bootstrap_servers = ['localhost:29092']
-    print("\n[STREAM-PROCESS]\n")
     logger.info("Connecting to Kafka client to initialize producer...")
     producer = create_producer(bootstrap_servers=bootstrap_servers)
 

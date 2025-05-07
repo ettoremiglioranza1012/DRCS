@@ -1,3 +1,4 @@
+
 # Utilities
 import random
 import os
@@ -88,7 +89,7 @@ def process_sensor_stations_microarea(
     Args:
         result (tuple): Tuple containing microarea_id and its bounding box (min_long, min_lat, max_long, max_lat).
         cur (psycopg2.extensions.cursor): Active PostgreSQL cursor.
-        macroarea_id tracking which macroarea we area processing.
+        macroarea_id tracking which macroarea is being processed.
     
     Returns:
         None
@@ -165,6 +166,5 @@ def process_sensor_stations_microarea(
     except Exception as e:
         log_to_json(f"Failed to process microarea {microarea_id}: {e}", level="WARNING")
         raise SyntaxError(f"[WARNING] Failed to process microarea {microarea_id}: {e}")
-
 
 

@@ -170,9 +170,10 @@ def macrogrid_reconstruction(microareas_bbox_dict: dict, i: int) -> None:
 def generate_sensor_stations(i: int) -> None:
     """
     For a given macroarea index `i`, this function:
-    - Retrieves the number of microareas in the macroarea from the dimension table `n_microareas`.
-    - Iterates through each microarea, fetches its bounding box coordinates from the corresponding table.
-    - Calls `process_sensor_stations_microarea` to populate a separate sensor station table.
+    - Create `stations` and `n_sens_stations` tables to keep record of sensor stations dimensional data.
+    - Retrieves the number of microareas in the macroarea from the dimension table `macroareas`.
+    - Iterates through each microarea, fetches its bounding box coordinates from the corresponding table `microareas`.
+    - Calls `process_sensor_stations_microarea` to populate a separate sensor `stations` and `n_sens_stations` tables.
     - Handles database connection and commits changes at the end.
 
     Args:
@@ -296,6 +297,7 @@ def process_macroareas():
     - Creates a regular grid of microareas (each 500m square) within that bounding box.
     - Reconstructs and exports the resulting macrogrid to a GeoJSON file for visualization and sanity check.
     - Loads the grid into a PostgreSQL database for real time images fetching.
+    - Call the generate sensor stations function to process of sensor generating and saves infos in database.
 
     This function is intended to be run once as part of the initial geodata ingestion phase.
     """
