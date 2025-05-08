@@ -1,11 +1,13 @@
 
 # Utilities
+from Utils.db_utils import connect_to_db
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple
+from psycopg2 import sql
 from PIL import Image
 import numpy as np
+import psycopg2
 import logging
-import base64
 import time
 import math
 import json
@@ -214,43 +216,111 @@ def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
     return buffer.getvalue()
 
 
-def serialize_image_payload(image_bytes: bytes, metadata: dict) -> str:
+def save_image_in_database(image_bytes: bytes, timestamp: str, macroarea_id: str, microarea_id: str) -> str:
     """
-    Encode a compressed image and metadata into a JSON-formatted string.
+    Saves a compressed image to the PostgreSQL database and returns a unique image ID.
+
+    This function:
+    - Ensures the existence of the `satellite_images` table with an `image_id` primary key.
+    - Inserts or updates the image using the generated `image_id`.
 
     Args:
-        image_bytes (bytes): Compressed image data (e.g., from JPEG compression).
-        metadata (dict): Dictionary containing metadata (timestamp, location, etc.).
+        image_bytes (bytes): Compressed image data.
+        timestamp (str): ISO 8601 formatted timestamp.
+        macroarea_id (str): Macroarea identifier.
+        microarea_id (str): Microarea identifier.
 
     Returns:
-        str: JSON string with base64-encoded image and associated metadata.
+        str: A unique image ID in the format "{macro}_{micro}_{timestamp}".
+    """
+    table_name = "satellite_images"
+    image_id = f"{macroarea_id}_{microarea_id}_{timestamp}"
+
+    try:
+        conn = connect_to_db()
+        cur = conn.cursor()
+
+        logger.info(f"Update or create (if not exists) {table_name}.")
+
+        cur.execute(sql.SQL("""
+            CREATE TABLE IF NOT EXISTS {} (
+                image_id TEXT PRIMARY KEY,
+                timestamp TEXT,
+                macroarea_id TEXT,
+                microarea_id TEXT,
+                image BYTEA
+            );
+        """).format(sql.Identifier(table_name)))
+
+        upsert_query = sql.SQL("""
+            INSERT INTO {} (image_id, timestamp, macroarea_id, microarea_id, image)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (image_id) DO UPDATE SET
+                image = EXCLUDED.image;
+        """).format(sql.Identifier(table_name))
+
+        cur.execute(upsert_query, (
+            image_id,
+            timestamp,
+            macroarea_id,
+            microarea_id,
+            psycopg2.Binary(image_bytes)
+        ))
+        conn.commit()
+
+        logger.info(f"Image stored with image_id={image_id} in table {table_name}.")
+
+        return image_id
+
+    except Exception as e:
+        print(f"[ERROR] Failed to store image with image_id={image_id}, Error: {e}")
+        raise
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+def serialize_image_payload(image_bytes: bytes, metadata: Dict, macroarea_id:str, microarea_id:str) -> str:
+    """
+    Save the compressed image in the database and serialize metadata + image pointer into JSON.
+
+    Args:
+        image_bytes (bytes): Compressed image data.
+        metadata (dict): Metadata including location, etc. Timestamp will be added automatically.
+
+    Returns:
+        str: JSON string with image pointer and associated metadata.
     """
     start_time = time.perf_counter()
-    # Run some tests
+
     if not isinstance(image_bytes, bytes):
         raise ValueError("[ERROR] image_bytes must be of type bytes")
-
     if not isinstance(metadata, dict):
         raise ValueError("[ERROR] metadata must be a dictionary")
 
-    logger.info(f"Serializing image of size {len(image_bytes)} bytes...")
-    
-    # Encode image bytes into base64 to safely embed in JSON
-    encoded = base64.b64encode(image_bytes).decode('utf-8')
+    # Get timestamp (ISO 8601 format)
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    metadata["timestamp"] = timestamp
 
-    # Create the payload with image data and metadata
+    logger.info(f"Saving image of size {len(image_bytes)} bytes to database...")
+
+    # Save image and get pointer
+    image_pointer = save_image_in_database(image_bytes, timestamp, macroarea_id, microarea_id)
+
+    # Create payload with metadata and image pointer
     payload = {
-        "image_data": encoded,
-        "metadata": metadata
+        "metadata": metadata,
+        "image_pointer": image_pointer
     }
 
-    # Convert dict to json 
     json_str = json.dumps(payload)
 
     elapsed = time.perf_counter() - start_time
     logger.info(f"Serialization complete. Payload size: {len(json_str)} characters in {elapsed:.3f} s\n")
 
-    # Convert the payload dictionary into a JSON string
     return json_str
 
 

@@ -173,6 +173,7 @@ def stream_macro_imgs(macroarea_i:int) -> None:
 
     print("\n")
     logger.info(f"Streaming data for macroarea_A{macroarea_i}...\n")
+    macroarea_id = f"A{macroarea_i}"
 
     while stream:
         try:
@@ -210,7 +211,7 @@ def stream_macro_imgs(macroarea_i:int) -> None:
             logger.info("Image np.ndarray shape: %s", true_color_imgs[0].shape)
             logger.info("Processing image...\n")
             t_proc = time.perf_counter()
-            img_payload_str = process_image(true_color_imgs)
+            img_payload_str = process_image(true_color_imgs, macroarea_id, microarea_example_id)
             logger.info("Image processed in %.2f s", time.perf_counter() - t_proc)
 
             topic = f"satellite_imgs_A{macroarea_i}"

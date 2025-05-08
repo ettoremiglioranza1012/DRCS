@@ -174,7 +174,7 @@ def fetch_micro_bbox_from_db(i: int) -> tuple | None:
     return bbox, microarea_id
 
 
-def process_image(requested_data):
+def process_image(requested_data:list, macroarea_id: str, microarea_id: str) -> str:
     if not requested_data:
         print("No image data to display.")
         return
@@ -190,7 +190,7 @@ def process_image(requested_data):
     metadata = dict()
 
     # Serialize image to Json with fake metadata
-    img_payload_prod = serialize_image_payload(img_bytes, metadata)
+    img_payload_prod = serialize_image_payload(img_bytes, metadata, macroarea_id, microarea_id)
 
     plot_image(filtered_img)
 

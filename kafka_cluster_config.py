@@ -46,7 +46,7 @@ def get_partitions(i: int) -> int:
 
 def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
     """
-    Verifies that each Kafka topic has the expected number of partitions.
+    Verifies that each Kafka topic has the expected number of partitions and checks their existence.
 
     Args:
         admin (KafkaAdminClient): Initialized KafkaAdminClient instance.
@@ -54,31 +54,36 @@ def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
 
     Prints:
         [INFO] if a topic has the correct number of partitions.
-        [ERROR] if a topic has an incorrect number of partitions.
-        [WARNING] if at least one topic is misconfigured.
+        [ERROR] if a topic has an incorrect number of partitions or does not exist.
+        [WARNING] if at least one topic is misconfigured or missing.
     """
-    print("[INFO] Verifying that all topics have the correct number of partitions...")
+    print("[INFO] Verifying that all topics exist and have the correct number of partitions...")
 
     try:
-        topics_metadata = admin.describe_topics(list(expected_partitions.keys()))
+        existing_topics_metadata = admin.list_topics()
+        existing_topics = set(existing_topics_metadata)
         all_ok = True
 
-        for topic_meta in topics_metadata:
-            topic = topic_meta['topic']
-            actual_count = len(topic_meta['partitions']) 
-            expected_count = expected_partitions[topic]    
+        for topic, expected_count in expected_partitions.items():
+            if topic not in existing_topics:
+                print(f"[ERROR] Topic '{topic}' does not exist.")
+                all_ok = False
+                continue
+
+            topic_metadata = admin.describe_topics([topic])[0]
+            actual_count = len(topic_metadata['partitions'])
 
             if actual_count != expected_count:
                 print(f"[ERROR] Topic '{topic}': expected {expected_count} partitions, but got {actual_count}.")
                 all_ok = False
             else:
                 print(f"[INFO] Topic '{topic}' has the correct number of partitions ({actual_count}).")
-        
+
         if all_ok:
             print("[INFO] All topics verified successfully.")
         else:
-            print("[WARNING] One or more topics have incorrect partition counts.")
-    
+            print("[WARNING] One or more topics are missing or have incorrect partition counts.")
+
     except Exception as e:
         print("[ERROR] Failed to verify topics:", e)
         raise
@@ -86,50 +91,50 @@ def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
 
 def kafka_cluster_config() -> None:
     """
-    Connects to a Kafka cluster and creates a set of topics for satellite image ingestion,
-    with the number of partitions for each topic dynamically determined from the database
-    based on the number of microareas per macroarea.
-
-    This function performs the following steps:
-    - Initializes a Kafka admin client
-    - Retrieves the number of partitions needed for each macroarea from the database
-    - Creates one topic per macroarea (e.g., satellite_imgs_A1, A2, ...)
-    - Verifies that each topic was created with the correct number of partitions
+    Connects to a Kafka cluster and creates sets of topics for satellite image and sensor station ingestion,
+    with the number of partitions dynamically determined from the database based on microareas per macroarea.
     """
 
-    # Init Kafka admin client
+    # Initialize Kafka admin client
     admin = KafkaAdminClient(
         bootstrap_servers="localhost:29092",
         client_id="setup-script"
     )
 
-    # Get number of partitions from DB
+    # Number of macroareas
     n_macros = 5
-    topics_name = [f"satellite_imgs_A{i}" for i in range(1, n_macros + 1)]
-    list_of_partitions_number = [get_partitions(i) for i in range(1, n_macros + 1)]
 
-    # Partition check
-    for i in range(n_macros):
-        print(f"[INFO] Found {list_of_partitions_number[i]} for macroarea_id: A{i + 1}")
-    
-    # Create topic definitions
-    topic_list = [
-        NewTopic(name=topics_name[i], num_partitions=list_of_partitions_number[i], replication_factor=1)
-        for i in range(n_macros)
+    # Fetch partitions number from DB
+    partitions_per_macroarea = {}
+    for i in range(1, n_macros + 1):
+        partitions = get_partitions(i)
+        partitions_per_macroarea[f"A{i}"] = partitions
+        print(f"[INFO] Found {partitions} partitions for macroarea_id: A{i}")
+
+    # Create topic definitions for satellite images
+    satellite_topics = [
+        NewTopic(name=f"satellite_imgs_A{i}", num_partitions=partitions_per_macroarea[f"A{i}"], replication_factor=1)
+        for i in range(1, n_macros + 1)
     ]
-    
+
+    # Create topic definitions for sensor stations (same partition counts)
+    sensor_topics = [
+        NewTopic(name=f"sensor_stations_A{i}", num_partitions=partitions_per_macroarea[f"A{i}"], replication_factor=1)
+        for i in range(1, n_macros + 1)
+    ]
+
+    # Combine topic lists
+    all_topics = satellite_topics + sensor_topics
+
     try:
         # Create topics
-        admin.create_topics(new_topics=topic_list, validate_only=False, timeout_ms=120000)
-        print(f"[INFO] Successfully created {n_macros} topics.")
+        admin.create_topics(new_topics=all_topics, validate_only=False, timeout_ms=120000)
+        print(f"[INFO] Successfully created {len(all_topics)} topics.")
 
-        # Expected partition mapping
-        expected_partitions = {
-            topics_name[i]: list_of_partitions_number[i]
-            for i in range(n_macros)
-        }
+        # Create expected partitions dictionary
+        expected_partitions = {topic.name: topic.num_partitions for topic in all_topics}
 
-        # Verification
+        # Verify topics
         verify_topics(admin, expected_partitions)
 
     except Exception as e:
@@ -138,3 +143,4 @@ def kafka_cluster_config() -> None:
 
 if __name__ == "__main__":
     kafka_cluster_config()
+
