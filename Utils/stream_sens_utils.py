@@ -1,9 +1,11 @@
 
 # Utilities
+from Utils.imgfetch_utils import fetch_micro_bbox_from_db
 from Utils.geo_sensor_utils import *
+from kafka.errors import KafkaError
+from kafka import KafkaProducer
 import logging
-import json
-import os 
+import time
 
 
 # Logs Configuration
@@ -15,13 +17,99 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
+    """
+    Creates a KafkaProducer configured for asynchronous message delivery
+    with standard durability settings (acks='1').
+
+    Configuration Highlights:
+    --------------------------
+    - Asynchronous Delivery:
+        Messages are sent in the background using callbacks.
+        The program does not block or wait for acknowledgment.
+    - acks = '1':
+        Kafka acknowledges the message once the **leader broker** receives it.
+        This provides low latency but does not guarantee replication to followers.
+    - JSON Serialization:
+        Message payloads are serialized to UTF-8 encoded JSON strings.
+
+    Parameters:
+    -----------
+    bootstrap_servers : list[str]
+        A list of Kafka broker addresses (e.g., ['localhost:9092']).
+
+    Returns:
+    --------
+    KafkaProducer
+        A configured Kafka producer instance ready for asynchronous send operations.
+    """
+    producer = KafkaProducer(
+        bootstrap_servers=bootstrap_servers,
+        acks='all',
+        retries=5,
+        value_serializer=lambda v: v.encode('utf8')
+    )
+
+    return producer
+
+
+def on_send_success(record_metadata):
+    """
+    Callback for successful Kafka message delivery.
+    
+    Parameters:
+    -----------
+    record_metadata : kafka.producer.record_metadata.RecordMetadata
+        Metadata containing topic name, partition, and offset of the delivered message.
+    """
+    logger.info(f"[KAFKA ASYNC] Message sent to topic '{record_metadata.topic}', "
+                f"partition {record_metadata.partition}, offset {record_metadata.offset}")
+
+
+def on_send_error(excp: KafkaError):
+    """
+    Callback for failed Kafka message delivery.
+
+    Parameters:
+    -----------
+    excp : KafkaError
+        The exception that occurred during message send.
+    """
+    logger.error(f"[KAFKA ERROR] Failed to send message: {excp}")
+
+
 def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
     """
-    Insert comment
+    Continuously simulates and streams fake IoT sensor measurements for a given microarea to a Kafka topic.
+
+    Steps:
+    1. Initializes a Kafka producer with retry logic.
+    2. Repeatedly fetches the number of stations for the specified microarea.
+    3. Generates and validates fake measurements for each station.
+    4. Serializes the data into JSON and sends it asynchronously to a Kafka topic.
+    5. Flushes the Kafka producer buffer and sleeps before the next iteration.
+
+    Parameters:
+        macroarea_i (int): The macroarea index (e.g., region identifier).
+        microarea_i (int): The microarea index (e.g., sub-region or cluster of sensors).
+
+    Returns:
+        None
     """
-    print("\n[STREAM-PROCESS]")
+    print("\n[STREAM-PROCESS]\n")
     
-    # Initialize Kafka Producer
+    # Initialize Kafka Producer with retry logic
+    bootstrap_servers = ['localhost:29092']
+    producer = None
+
+    while producer is None:
+        try:
+            logger.info("Connecting to Kafka client to initialize producer...")
+            producer = create_producer(bootstrap_servers=bootstrap_servers)
+            logger.info("Kafka producer initialized successfully.")
+        except Exception as e:
+            logger.warning(f"Kafka connection failed: {e}. Retrying...")
+            continue
 
     # Set up data stream parameters
     stream = True   # Stream until False
@@ -33,49 +121,61 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
         try:
             logger.info("Fetching microarea sensor stations information...")
             n_stats = get_number_of_stats(macroarea_i, microarea_i)
-            logger.info("Fetching completed sucessfully.")
+            if not isinstance(n_stats, int):
+                logger.error("'n_stats' must be an integer.")
+                continue
+            logger.info("Fetching completed successfully.")
 
-            if not n_stats > 49 or not n_stats:
-                raise SystemError(f"Number of stations inconsistent: {n_stats}, check data integrity.")
-            
+            if not n_stats:
+                logger.error(f"Number of stations inconsistent: {n_stats}, check data integrity.")
+                continue
+
             # Generate fake measurements for i-th station in microarea
             list_of_mesdict = list()
-            logger.info(f"Fetching measurements for each stations in microarea: 'A{macroarea_i}-{microarea_i}'")
+            logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-{microarea_i}'")
             for i in range(n_stats):
                 temp_mes = generate_measurements_json(i+1, microarea_i, macroarea_i)
-                list_of_mesdict.append(temp_mes)
                 if not temp_mes:
-                    raise ValueError(f"Measurements for 'S_A{macroarea_i}-M{microarea_i}_{i:03}' not consistent, check 'generate_measurements_json()' function.")
+                    logger.error(f"Measurements for 'S_A{macroarea_i}-M{microarea_i}_{i:03}' not consistent, check 'generate_measurements_json()' function.")
+                    continue
+                list_of_mesdict.append(temp_mes)
             
-            # Dump data inside message with json format
-            message = list_of_mesdict
-            if not message or not len(message) > 49:
-                raise ValueError("Message not consistent, check data integrity.")
-            logger.info("Fetching completed sucessfully.")
+            if not list_of_mesdict or not len(list_of_mesdict) > 49:
+                logger.error("Message not consistent or too few stations, check data integrity.")
+                continue
+            logger.info("All tests passed. Message data OK -> ready to send to Kafka.")
+
+            # Queues the message in memory (producer buffer)
+            topic = f"sensor_stations_A{macroarea_i}"  # Custom topic per area
+            logger.info("Sending IoT sensor data to Kafka asynchronously...")
+
+            try:
+                value = json.dumps(list_of_mesdict)
+                _, microarea_id = fetch_micro_bbox_from_db(macroarea_i, microarea_i)
+
+                # Hashing Key to identify partition
+                key = microarea_id.encode('utf8')
+
+                # Asynchronous sending
+                producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                logger.info("Message sent successfully.")
+            except Exception as e:
+                logger.error(f"Failed to queue the message: {e}")
+                continue
+
+            # Ensure the message is actually sent before continuing to the next iteration
+            try:
+                producer.flush()
+                logger.info("Message flushed.\n")
+            except Exception as e:
+                logger.error(f"Failed to flush the message: {e}")
+                continue
+
+            time.sleep(5)  # One message every 5 s
 
         except Exception as e:
-            raise SystemError(f"Error during streaming procedure: {e}")
+            logger.error(f"Unhandled error during streaming procedure: {e}")
+            continue
 
 
-"""
-            if not os.path.isfile('messages.json'):
-                with open('messages.json', 'w') as f:
-                    # '.dump' create instead an fie-like object. 
-                    json.dump(message, f, indent=4) # I the file doesn't exist, create it and dump the message.
-            else:
-                with open('messages.json', 'r+', encoding='utf-8') as f:
-                    try:
-                        data = json.load(f)         # Load the already existing list of dict.
-                    except json.JSONDecodeError:
-                        data = []                   # If the file is corrupted, create an empty list.
-                    
-                    data.append(message)            # Append last dict/message.
-                    
-                    f.seek(0)                       # Move the cursor back to the start of the file, so it can be overwritten from the beginning. 
-                    
-                    json.dump(data, f, indent=4)    # Serializes the updated list back into JSON format and writes it to the file, starting at the top.
-                    
-                    f.truncate()                    # Trims the file after the current write position — this is important!
-                                                    # If the new content is shorter than the old one, it avoids leaving trailing junk from the old data.
-                                                    # It shouldn't happen cause we have sequential messages, but just in case we put it.
-"""
+

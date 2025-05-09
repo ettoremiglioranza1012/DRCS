@@ -1,13 +1,12 @@
 
 # Utilities
-from Utils.imgfilter_utils import generate_fire_mask
 from datetime import date, timedelta, datetime
 from Utils.db_utils import connect_to_db
 from Utils.imgfetch_utils import *
 from psycopg2 import sql
-import numpy as np
 import psycopg2
 import random
+import time
 import json
 import os
 
@@ -209,7 +208,6 @@ def get_number_of_stats(macroarea_i: int, microarea_i:int) -> int:
             print(f"[ERROR] Not able to close connection: {e}")
 
 
-
 def generate_measurements_json(stations_i: int, microarea_i: int, macroarea_i: int, margin: float = 0.95) -> dict:
     """
     Generates a dict simulating environmental sensor data.
@@ -284,7 +282,7 @@ def generate_measurements_json(stations_i: int, microarea_i: int, macroarea_i: i
 
         data = {
             "station_id": f"S_A{macroarea_i}-M{microarea_i}_{stations_i:03}",
-            "timestamp": datetime.now().isoformat() + "Z",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
 
             "measurements": measurements,
 
@@ -299,7 +297,7 @@ def generate_measurements_json(stations_i: int, microarea_i: int, macroarea_i: i
                 "automated": True
             }
         }
-
+        
         return data
     
     except Exception as e:

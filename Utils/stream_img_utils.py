@@ -120,7 +120,7 @@ def send_message_to_kafka(message_payload: str, topic: str, producer: KafkaProdu
         logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
 
 
-def stream_macro_imgs(macroarea_i:int) -> None:
+def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
     """
     Streams satellite image data for a given macroarea and publishes it to a Kafka topic.
 
@@ -147,12 +147,14 @@ def stream_macro_imgs(macroarea_i:int) -> None:
     -----------
     macroarea_i : int
         The numeric ID of the macroarea (e.g., 1 to 5) used to build topic names and fetch spatial data.
-
+    microarea_i : int
+        The numeric ID of the microarea (e.g., 1 to 80) used to fetch specific spatial data.
+        
     Notes:
     ------
     - Kafka delivery is synchronous and blocking (via `future.get()`), ensuring guaranteed write acknowledgment.
     - The topic is expected to be named like 'satellite_imgs_A{macroarea_i}' and pre-created with partitions.
-    - The loop will wait for the remainder of a X-second interval to maintain consistent image intervals.
+    - The loop will wait for the remainder of a X-seconds interval to maintain consistent image intervals.
     - This function is designed to run indefinitely unless an error or empty image response occurs.
     """
     print("\n[STREAM-PROCESS]\n")
@@ -160,10 +162,18 @@ def stream_macro_imgs(macroarea_i:int) -> None:
     # Initialize SentinelHub Client
     config = SHConfig()
     
-    # Initialize Kafka Producer
+    # Initialize Kafka Producer with retry logic
     bootstrap_servers = ['localhost:29092']
-    logger.info("Connecting to Kafka client to initialize producer...")
-    producer = create_producer(bootstrap_servers=bootstrap_servers)
+    producer = None
+
+    while producer is None:
+        try:
+            logger.info("Connecting to Kafka client to initialize producer...")
+            producer = create_producer(bootstrap_servers=bootstrap_servers)
+            logger.info("Kafka producer initialized successfully.")
+        except Exception as e:
+            logger.warning(f"Kafka connection failed: {e}. Retrying...")
+            continue
 
     # Set up data stream parameters
     stream = True               # Stream until False
@@ -180,12 +190,16 @@ def stream_macro_imgs(macroarea_i:int) -> None:
             t_macro_start = time.perf_counter()
 
             logger.info("Fetching bounding box from DB...")
-            microarea_example_bbox, microarea_example_id = fetch_micro_bbox_from_db(macroarea_i)
-            if microarea_example_bbox is None:
+            microarea_bbox, microarea_id = fetch_micro_bbox_from_db(macroarea_i, microarea_i)
+            if microarea_bbox is None:
                 logger.error(f"No bounding box found for macroarea {macroarea_i}, skipping.")
-                break
+                continue
+            
+            if not isinstance(macroarea_id, str):
+                logger.error("Microarea id fetched must be a string")
+                continue
 
-            curr_aoi_coords_wgs84 = list(microarea_example_bbox)
+            curr_aoi_coords_wgs84 = list(microarea_bbox)
 
             logger.info("Converting BBox and calculating image size...")
             t_bbox = time.perf_counter()
@@ -211,13 +225,16 @@ def stream_macro_imgs(macroarea_i:int) -> None:
             logger.info("Image np.ndarray shape: %s", true_color_imgs[0].shape)
             logger.info("Processing image...\n")
             t_proc = time.perf_counter()
-            img_payload_str = process_image(true_color_imgs, macroarea_id, microarea_example_id)
+            img_payload_str = process_image(true_color_imgs, macroarea_id, microarea_id, microarea_bbox)
+            if img_payload_str is None:
+                logger.warning("Image processing failed — skipping current iteration.")
+                continue  
             logger.info("Image processed in %.2f s", time.perf_counter() - t_proc)
 
             topic = f"satellite_imgs_A{macroarea_i}"
             logger.info("Sending payload to Kafka...")
             t_send = time.perf_counter()
-            send_message_to_kafka(img_payload_str, topic, producer, microarea_example_id)
+            send_message_to_kafka(img_payload_str, topic, producer, microarea_id)
             logger.info("Sending procedure closed in %.2f s\n", time.perf_counter() - t_send)
 
             iteration_time = time.perf_counter() - t_macro_start
@@ -239,4 +256,5 @@ def stream_macro_imgs(macroarea_i:int) -> None:
             logger.info("Waiting %.2f s before next image fetching...\n\n", remaining_time)
             if remaining_time > 0:
                 time.sleep(remaining_time)
+
 

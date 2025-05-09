@@ -1,13 +1,13 @@
 
 # Utilities
-from Utils.db_utils import connect_to_db
+from botocore.client import Config
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple
-from psycopg2 import sql
 from PIL import Image
 import numpy as np
-import psycopg2
 import logging
+import random
+import boto3
 import time
 import math
 import json
@@ -21,6 +21,17 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+
+# --- MinIO S3-compatible client setup ---
+s3 = boto3.client(
+    's3',
+    endpoint_url='http://localhost:9000',
+    aws_access_key_id='minioadmin',
+    aws_secret_access_key='minioadmin',
+    config=Config(signature_version='s3v4'),
+    region_name='us-east-1'
+)
 
 
 def read_json(macroarea_input_path: str) -> Dict:
@@ -216,71 +227,164 @@ def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
     return buffer.getvalue()
 
 
-def save_image_in_database(image_bytes: bytes, timestamp: str, macroarea_id: str, microarea_id: str) -> str:
+def save_image_in_S3(image_bytes: bytes, timestamp: str, macroarea_id: str, microarea_id: str) -> str:
     """
-    Saves a compressed image to the PostgreSQL database and returns a unique image ID.
-
-    This function:
-    - Ensures the existence of the `satellite_images` table with an `image_id` primary key.
-    - Inserts or updates the image using the generated `image_id`.
+    Compress a NumPy image array and upload it to MinIO using boto3.
 
     Args:
-        image_bytes (bytes): Compressed image data.
-        timestamp (str): ISO 8601 formatted timestamp.
-        macroarea_id (str): Macroarea identifier.
-        microarea_id (str): Microarea identifier.
-
-    Returns:
-        str: A unique image ID in the format "{macro}_{micro}_{timestamp}".
+        bucket_name (str): The name of the MinIO bucket.
+        object_key (str): The key (path) to store the image, e.g. 'region1/2025-05-09/image1.jpg'.
+        img (np.ndarray): Image array of shape (H, W, 3).
+        quality (int): JPEG compression quality (default 85).
     """
-    table_name = "satellite_images"
-    image_id = f"{macroarea_id}_{microarea_id}_{timestamp}"
+    bucket_name = "satellite-imgs"
+    image_file_id = f"{macroarea_id}_{microarea_id}_{timestamp}"
+    object_key = f"{image_file_id}.jpg"
 
+    # Make sure the bucket exists
     try:
-        conn = connect_to_db()
-        cur = conn.cursor()
+        s3.head_bucket(Bucket=bucket_name)
+    except s3.exceptions.ClientError:
+        s3.create_bucket(Bucket=bucket_name)
+    
+    # Put object in bucket
+    try:
+        s3.put_object(
+            Bucket=bucket_name,
+            Key=object_key,
+            Body=image_bytes,
+            ContentType='image/jpeg'
+        )
+        logger.info(f"Uploaded to bucket '{bucket_name}' at key '{object_key}'")
 
-        logger.info(f"Update or create (if not exists) {table_name}.")
-
-        cur.execute(sql.SQL("""
-            CREATE TABLE IF NOT EXISTS {} (
-                image_id TEXT PRIMARY KEY,
-                timestamp TEXT,
-                macroarea_id TEXT,
-                microarea_id TEXT,
-                image BYTEA
-            );
-        """).format(sql.Identifier(table_name)))
-
-        upsert_query = sql.SQL("""
-            INSERT INTO {} (image_id, timestamp, macroarea_id, microarea_id, image)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (image_id) DO UPDATE SET
-                image = EXCLUDED.image;
-        """).format(sql.Identifier(table_name))
-
-        cur.execute(upsert_query, (
-            image_id,
-            timestamp,
-            macroarea_id,
-            microarea_id,
-            psycopg2.Binary(image_bytes)
-        ))
-        conn.commit()
-
-        logger.info(f"Image stored with image_id={image_id} in table {table_name}.")
-
-        return image_id
+        return image_file_id
 
     except Exception as e:
-        print(f"[ERROR] Failed to store image with image_id={image_id}, Error: {e}")
-        raise
+        raise SystemError(f"[ERROR] Failed to store image with image_id={image_file_id}, Error: {e}")
 
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+
+def generate_pixel_data(lat: float, lon: float, macroarea_id: str, fire_probability: float = 0.2) -> dict:
+    """
+    Generate synthetic satellite data for a given pixel.
+    In fire_probability fraction of the cases, simulate fire conditions
+    by adjusting band values and classification.
+
+    Args:
+        lat (float): Latitude of the pixel.
+        lon (float): Longitude of the pixel.
+        tile_id (str): Sentinel-2 tile ID. Default is "T11SML".
+        fire_probability (float): Probability that the pixel simulates fire conditions.
+
+    Returns:
+        dict: A dictionary representing the pixel with coordinates, band values,
+              vegetation indices, and classification (either 'fire' or 'vegetation').
+    """
+    is_fire = random.random() < fire_probability
+
+    if is_fire:
+        # Simulated fire conditions
+        B4 = random.uniform(0.3, 0.4)
+        B8 = random.uniform(0.1, 0.2)
+        B3 = random.uniform(0.05, 0.1)
+        B11 = random.uniform(0.2, 0.3)
+        B12 = random.uniform(0.2, 0.3)
+    else:
+        # Normal vegetation
+        B4 = random.uniform(0.05, 0.2)
+        B8 = random.uniform(0.3, 0.5)
+        B3 = random.uniform(0.1, 0.3)
+        B11 = random.uniform(0.05, 0.2)
+        B12 = random.uniform(0.05, 0.2)
+
+    NDVI = round((B8 - B4) / (B8 + B4), 3)
+    NDMI = round((B8 - B11) / (B8 + B11), 3)
+    NDWI = round((B3 - B8) / (B3 + B8), 3)
+    NBR = round((B8 - B12) / (B8 + B12), 3)
+
+    pixel_json = {
+        "latitude": round(lat, 6),
+        "longitude": round(lon, 6),
+        "tile_id": macroarea_id,
+        "bands": {
+            "B2": round(random.uniform(0.05, 0.2), 3),
+            "B3": round(B3, 3),
+            "B4": round(B4, 3),
+            "B8": round(B8, 3),
+            "B8A": round(random.uniform(0.05, 0.3), 3),
+            "B11": round(B11, 3),
+            "B12": round(B12, 3)
+        },
+        "indices": {
+            "NDVI": NDVI,
+            "NDMI": NDMI,
+            "NDWI": NDWI,
+            "NBR": NBR
+        },
+        "classification": {
+            "scene_class": "fire" if is_fire else "vegetation"
+        }
+    }
+
+    return pixel_json
+
+
+def firedet_bands_metadata(bbox_list: list, macroarea_id: str, n: int = 50, fire_probability: float = 0.2) -> dict:
+    """
+    Generate synthetic satellite pixel data for a geographic area.
+    Randomly samples n pixels within the bounding box and computes whether
+    any pixel is classified as 'fire' based on fire_probability.
+
+    Args:
+        bbox_list (list): Bounding box defined as [min_long, min_lat, max_long, max_lat].
+        n (int): Number of pixels to generate. Default is 50.
+        fire_probability (float): Probability that a pixel simulates fire conditions.
+
+    Returns:
+        dict: {
+            'fire_detected': bool,
+            'satellite_data': list of valid pixel dictionaries
+        }
+
+    Raises:
+        ValueError: If bbox_list is invalid or n <= 0
+    """
+    # Validate bounding box
+    if not isinstance(bbox_list, (list, tuple)) or len(bbox_list) != 4:
+        raise ValueError("[ERROR] bbox_list must be a list of 4 coordinates [min_long, min_lat, max_long, max_lat]")
+
+    try:
+        n = int(n)
+    except Exception:
+        raise ValueError(f"[ERROR] Invalid value for n: {n}. Must be an integer.")
+
+    if n <= 0:
+        raise ValueError("[ERROR] n must be a positive integer")
+
+    min_long, min_lat, max_long, max_lat = bbox_list
+    sampled_pixels = []
+    fire_detected = False
+
+    for i in range(n):
+        try:
+            lon = random.uniform(min_long, max_long)
+            lat = random.uniform(min_lat, max_lat)
+            pixel_data = generate_pixel_data(lat, lon, macroarea_id=macroarea_id, fire_probability=fire_probability)
+
+            if pixel_data["classification"]["scene_class"] == "fire":
+                fire_detected = True
+
+            sampled_pixels.append(pixel_data)
+
+        except Exception as e:
+            print(f"[WARNING] Failed to generate pixel {i+1}/{n}: {e}")
+            continue
+
+    metadata = {
+        "fire_detected": fire_detected,
+        "satellite_data": sampled_pixels
+    }
+
+    return metadata
 
 
 def serialize_image_payload(image_bytes: bytes, metadata: Dict, macroarea_id:str, microarea_id:str) -> str:
@@ -303,22 +407,23 @@ def serialize_image_payload(image_bytes: bytes, metadata: Dict, macroarea_id:str
 
     # Get timestamp (ISO 8601 format)
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
-    metadata["timestamp"] = timestamp
+    metadata['timestamp'] = timestamp
 
     logger.info(f"Saving image of size {len(image_bytes)} bytes to database...")
 
     # Save image and get pointer
-    image_pointer = save_image_in_database(image_bytes, timestamp, macroarea_id, microarea_id)
+    image_pointer = save_image_in_S3(image_bytes, timestamp, macroarea_id, microarea_id)
 
     # Create payload with metadata and image pointer
     payload = {
+        "image_pointer": image_pointer,
         "metadata": metadata,
-        "image_pointer": image_pointer
     }
 
     json_str = json.dumps(payload)
 
     elapsed = time.perf_counter() - start_time
+    logger.info("Meta data appended to img successfully.")
     logger.info(f"Serialization complete. Payload size: {len(json_str)} characters in {elapsed:.3f} s\n")
 
     return json_str
@@ -354,7 +459,5 @@ def plot_image(image: np.ndarray, factor: float = 3.5/255, clip_range: Tuple[flo
     plt.axis('off')
 
     plt.show()
-
-
 
 

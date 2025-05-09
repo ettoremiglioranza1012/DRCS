@@ -4,11 +4,11 @@ from Utils.imgfilter_utils import filter_image
 from Utils.db_utils import connect_to_db
 from psycopg2 import sql
 import logging
-import random
 
 from Utils.geo_img_utils import (
     compress_image_with_pil,
     serialize_image_payload,
+    firedet_bands_metadata,
     plot_image
 )
 
@@ -122,12 +122,13 @@ def true_color_image_request_processing(aoi_bbox: BBox,
     return request_true_color
 
 
-def fetch_micro_bbox_from_db(i: int) -> tuple | None:
+def fetch_micro_bbox_from_db(macro_i: int, micro_i) -> tuple | None:
     """
     Retrieves the bounding box of a specific microarea within a macroarea from the database.
 
     Args:
-        i (int): The index of the macroarea (e.g., 1 for 'A1').
+        macro_i (int): The index of the macroarea (e.g., 1 for 'A1').
+        micro_i (int): The index of the microarea (e.g., 25 for 'A1-M25')
 
     Returns:
         tuple or None: A tuple of (min_long, min_lat, max_long, max_lat) if a bounding box is found,
@@ -136,25 +137,8 @@ def fetch_micro_bbox_from_db(i: int) -> tuple | None:
     conn = connect_to_db()
     cur = conn.cursor()
 
-    macroarea_id = f"A{i}"
     table_name = f"microareas"
-
-    # Step 1: Retrieve number of microareas from n_microareas
-    cur.execute(sql.SQL("""
-        SELECT numof_microareas 
-        FROM macroareas
-        WHERE macroarea_id = %s             
-    """), (macroarea_id,))
-
-    result = cur.fetchone()
-    if result is None:
-        return None  # No such macroarea_id in summary table
-
-    n_microareas = result[0]
-
-    # Step 2: Choose a random microarea index
-    n_example = random.randint(1, n_microareas)
-    microarea_id = f"{macroarea_id}-M{n_example}"
+    microarea_id = f"A{macro_i}-M{micro_i}"
 
     # Step 3: Fetch bounding box from microarea table
     cur.execute(sql.SQL("""
@@ -174,25 +158,61 @@ def fetch_micro_bbox_from_db(i: int) -> tuple | None:
     return bbox, microarea_id
 
 
-def process_image(requested_data:list, macroarea_id: str, microarea_id: str) -> str:
+def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bbox: list[float, float, float, float]) -> str:
+    """
+    Processes a satellite image by applying filtering, compression, and metadata serialization.
+
+    Steps:
+    1. Checks if image data is provided.
+    2. Filters the first image using a custom filter function.
+    3. Compresses the filtered image using PIL (e.g., JPEG encoding).
+    4. Generates placeholder metadata (can be replaced with real logic).
+    5. Serializes the image, metadata, and location identifiers into a JSON payload.
+    6. Displays the filtered image.
+    
+    Parameters:
+        requested_data (List): A list of image data (assumes first element is the image to process).
+        macroarea_id (str): Identifier for the macro geographical area.
+        microarea_id (str): Identifier for the micro geographical area.
+
+    Returns:
+        str: JSON-serialized payload containing image bytes, metadata, and area identifiers.
+                       Returns None if no image data is provided.
+    """
     if not requested_data:
         print("No image data to display.")
         return
     image = requested_data[0]
     
-    # Filter the image
-    filtered_img = filter_image(image)
+    try:
+        # 1. Filter the image
+        filtered_img = filter_image(image)
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to filter image: {e}")
+        return None
 
-    # Compress image with PIL
-    img_bytes = compress_image_with_pil(filtered_img)
-    
-    # Meta data generator --> Gino's research
-    metadata = dict()
+    try:
+        # 2. Compress image with PIL
+        img_bytes = compress_image_with_pil(filtered_img)
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to compress image: {e}")
+        return None
 
-    # Serialize image to Json with fake metadata
-    img_payload_prod = serialize_image_payload(img_bytes, metadata, macroarea_id, microarea_id)
+    try:
+        # 3. Generate synthetic metadata (with fire detection)
+        metadata = firedet_bands_metadata(bbox, macroarea_id)
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to generate metadata: {e}")
+        return None
 
-    plot_image(filtered_img)
+    try:
+        # 4. Serialize image + metadata into final payload
+        img_payload_prod = serialize_image_payload(img_bytes, metadata, macroarea_id, microarea_id)
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to serialize payload: {e}")
+        return None
+
+    #plot_image(filtered_img)
 
     return img_payload_prod
     
