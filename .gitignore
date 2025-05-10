@@ -5,14 +5,8 @@ __pycache__/
 *.pyd
 
 # Virtual environments
-venv/
+.venv/
 env/
-
-# VSCode settings
-.vscode/
-
-# Old scripts
-Satellite/Unused/
 
 # PostgreSQL data directory (if mounted)
 db_data/

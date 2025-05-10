@@ -37,10 +37,6 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
-      KAFKA_MESSAGE_MAX_BYTES: 2000000
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 2000000
-      KAFKA_FETCH_MESSAGE_MAX_BYTES: 20000000
-      KAFKA_SOCKET_REQUEST_MAX_BYTES: 20000000
 
   minio:
     image: minio/minio:latest
@@ -56,6 +52,31 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
 
+  setup_orchestrator:
+    build:
+      context: ./setup_orchestrator
+    depends_on:
+      - postgres
+      - kafka
+      - zookeeper
+      - minio
+    restart: "no"  # exit after success
+
+  img_producer:
+    build:
+      context: ./imgproducer_m5
+    depends_on:
+      - setup_orchestrator
+    restart: always
+
+  sens_producer:
+    build:
+      context: ./sensproducer_m5
+    depends_on:
+      - setup_orchestrator
+    restart: always
+
 volumes:
   db_data:
   minio_data:
+
