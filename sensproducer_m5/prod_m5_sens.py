@@ -1,6 +1,6 @@
 
 # Utilities
-from sensproducer_m5.Utils.stream_sens_utils import stream_micro_sens
+from Utils.stream_sens_utils import stream_micro_sens
 
 
 def stream_example():

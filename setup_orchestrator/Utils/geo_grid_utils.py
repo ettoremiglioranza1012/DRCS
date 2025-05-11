@@ -1,7 +1,7 @@
 
 # Utilities
+from Utils.db_utils import connect_to_db
 from datetime import date, timedelta
-from db_utils import connect_to_db
 from typing import Dict, Tuple
 from psycopg2 import sql
 import psycopg2
@@ -284,39 +284,4 @@ def process_sensor_stations_microarea(
 
     except Exception as e:
         raise SyntaxError(f"[WARNING] Failed to process microarea {microarea_id}: {e}")
-    
-
-def get_number_of_stats(macroarea_i: int, microarea_i:int) -> int:
-    """
-    
-    """
-    try:
-        # Database connection
-        conn = connect_to_db()
-        cur = conn.cursor()
-        
-        # Retrive number of sensor stations for given microarea
-        microarea_id = f"A{macroarea_i}-M{microarea_i}"
-        
-        cur.execute(("""
-            SELECT numof_sens_stations 
-            FROM n_sens_stations
-            WHERE microarea_id = %s
-        """), (microarea_id,))
-        result =  cur.fetchone()
-
-        if result is None:
-            raise ValueError(f"No entry found for microarea ID '{microarea_id}'")
-        
-        return result[0]
-    
-    except Exception as e:
-        raise ValueError(f"Error during connection to 'n_sens_stations': {e}")
-    
-    finally:
-        try: 
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception as e:
-            print(f"[ERROR] Not able to close connection: {e}")
 

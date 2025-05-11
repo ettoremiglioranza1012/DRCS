@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   postgres:
@@ -10,8 +9,6 @@ services:
       POSTGRES_DB: california_db
     ports:
       - "5433:5432"
-    volumes:
-      - ./db_data:/var/lib/postgresql/data
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -44,8 +41,6 @@ services:
     ports:
       - "9000:9000"  # S3 API
       - "9001:9001"  # Web UI
-    volumes:
-      - minio_data:/data
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -75,8 +70,4 @@ services:
     depends_on:
       - setup_orchestrator
     restart: always
-
-volumes:
-  db_data:
-  minio_data:
 

@@ -1,6 +1,6 @@
 
 # Utilites
-from imgproducer_m5.Utils.stream_img_utils import stream_macro_imgs
+from Utils.stream_img_utils import stream_macro_imgs
 
 
 def stream_example():

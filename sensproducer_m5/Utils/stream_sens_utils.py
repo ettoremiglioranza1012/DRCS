@@ -1,6 +1,6 @@
 
 # Utilities
-from sensproducer_m5.Utils.geo_sens_utils import *
+from Utils.geo_sens_utils import *
 from kafka.errors import KafkaError
 from kafka import KafkaProducer
 import logging

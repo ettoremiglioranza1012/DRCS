@@ -34,6 +34,7 @@ def verify_topics(admin: KafkaAdminClient, expected_partitions: dict) -> None:
         print("[ERROR] Failed to verify topics:", e)
         raise
 
+
 def kafka_cluster_config() -> None:
     # Count macroareas from files in Macro_data/Macro_input
     macro_dir = "Macro_data/Macro_input"
@@ -60,6 +61,7 @@ def kafka_cluster_config() -> None:
 
     except Exception as e:
         print(f"[ERROR] Topics not created: {e}")
+
 
 if __name__ == "__main__":
     kafka_cluster_config()

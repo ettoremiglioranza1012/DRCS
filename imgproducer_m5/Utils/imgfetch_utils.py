@@ -1,11 +1,11 @@
 
 # Utilities
-from imgproducer_m5.Utils.imgfilter_utils import filter_image
+from Utils.imgfilter_utils import filter_image
 from Utils.db_utils import connect_to_db
 from psycopg2 import sql
 import logging
 
-from imgproducer_m5.Utils.geo_img_utils import (
+from Utils.geo_img_utils import (
     compress_image_with_pil,
     serialize_image_payload,
     firedet_bands_metadata

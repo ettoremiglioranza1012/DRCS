@@ -42,38 +42,7 @@ psql -h localhost -p 5433 -U gruppo3 -d california_db
 
 ---
 
-## 🧪 Enviroment Setup
-
-> Create a virtual environment and install dependencies:
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
----
-
-### 🗂️ 1. Generate Microarea Grid
-
-Run this script once to populate the PostgreSQL database with grid data for each macroarea:
-
-```bash
-python geo_grid_processor.py
-```
-
-It will:
-
-- Read each `macroarea_{i}.json` GeoJSON file in `Macro_data/Macro_input`
-- Create a grid of microareas inside it
-- Store each bounding box in tables `macro_area_i`
-- Update a global tracking table `n_microareas`
-
-You can inspect the output GeoJSONs in `Macro_data/Macro_output` (reconstructed macrogrid for sanity check from microgrid areas).
-
----
-
-### 🔐 2. SentinelHub Configuration (REQUIRED)
+### 🔐 SentinelHub Configuration (REQUIRED)
 
 Before running image acquisition scripts, you must **configure your SentinelHub credentials** locally:
 

@@ -6,7 +6,7 @@ from kafka import KafkaProducer
 import logging
 import time
 
-from imgproducer_m5.Utils.imgfetch_utils import (
+from Utils.imgfetch_utils import (
     get_aoi_bbox_and_size,
     true_color_image_request_processing,
     process_image,
@@ -213,5 +213,4 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
             logger.info("Waiting %.2f s before next image fetching...\n\n", remaining_time)
             if remaining_time > 0:
                 time.sleep(remaining_time)
-
 

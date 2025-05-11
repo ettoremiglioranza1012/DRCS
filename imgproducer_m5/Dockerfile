@@ -4,11 +4,12 @@ FROM python:3.10-slim
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy the entire imgproducer_m5 directory into the container
+# Copy everything into /app
 COPY . .
 
-# Set SentinelHub config path (if used internally by SHConfig)
-ENV SENTINELHUB_CONFIG=imgproducer_m5/Config/config.toml
+# ✅ Ensure the SentinelHub config ends up in the expected path
+RUN mkdir -p /root/.config/sentinelhub \
+ && cp Config/config.toml /root/.config/sentinelhub/config.toml
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
