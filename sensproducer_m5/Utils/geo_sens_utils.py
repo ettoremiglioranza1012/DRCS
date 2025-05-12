@@ -40,7 +40,13 @@ def get_number_of_stats(macroarea_i: int, microarea_i:int) -> int:
             print(f"[ERROR] Not able to close connection: {e}")
 
 
-def generate_measurements_json(stations_i: int, microarea_i: int, macroarea_i: int, margin: float = 0.95) -> dict:
+def generate_measurements_json(
+    stations_i: int, 
+    microarea_i: int, 
+    macroarea_i: int, 
+    timestamp: str, 
+    margin: float = 0.95
+) -> dict:
     """
     Generates a dict simulating environmental sensor data.
     In 20% of the cases, simulates a wildfire detection with anomalous values.
@@ -114,7 +120,7 @@ def generate_measurements_json(stations_i: int, microarea_i: int, macroarea_i: i
 
         data = {
             "station_id": f"S_A{macroarea_i}-M{microarea_i}_{stations_i:03}",
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "timestamp": timestamp,
 
             "measurements": measurements,
 

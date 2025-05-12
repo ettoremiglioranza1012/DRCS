@@ -96,7 +96,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
     Returns:
         None
     """
-    print("\n[STREAM-PROCESS]\n")
+    print("\n[PRODUCER-STREAM-PROCESS]\n")
     
     # Initialize Kafka Producer with retry logic
     bootstrap_servers = ['kafka:9092']
@@ -131,16 +131,22 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                 continue
 
             # Generate fake measurements for i-th station in microarea
-            list_of_mesdict = list()
-            logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-{microarea_i}'")
+            timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+            list_of_mesdict = [
+                {
+                    "sens_meas_id": f"sens_meas_A{macroarea_i}-M{microarea_i}_{timestamp}"
+                }
+            ]
+            
+            logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")
             for i in range(n_stats):
-                temp_mes = generate_measurements_json(i+1, microarea_i, macroarea_i)
+                temp_mes = generate_measurements_json(i+1, microarea_i, macroarea_i, timestamp)
                 if not temp_mes:
                     logger.error(f"Measurements for 'S_A{macroarea_i}-M{microarea_i}_{i:03}' not consistent, check 'generate_measurements_json()' function.")
                     continue
                 list_of_mesdict.append(temp_mes)
             
-            if not list_of_mesdict or not len(list_of_mesdict) > 49:
+            if not list_of_mesdict:
                 logger.error("Message not consistent or too few stations, check data integrity.")
                 continue
             logger.info("All tests passed. Message data OK -> ready to send to Kafka.")

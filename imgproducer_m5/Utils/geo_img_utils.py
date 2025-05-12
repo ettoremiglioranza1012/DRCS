@@ -83,7 +83,7 @@ def save_image_in_S3(image_bytes: bytes, timestamp: str, macroarea_id: str, micr
         quality (int): JPEG compression quality (default 85).
     """
     bucket_name = "satellite-imgs"
-    image_file_id = f"{macroarea_id}_{microarea_id}_{timestamp}"
+    image_file_id = f"sat_img_{macroarea_id}_{microarea_id}_{timestamp}"
     object_key = f"{image_file_id}.jpg"
 
     # Make sure the bucket exists

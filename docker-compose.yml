@@ -71,3 +71,11 @@ services:
       - setup_orchestrator
     restart: always
 
+  img_consumer:
+    build:
+      context: ./img_consumer
+    depends_on:
+      - img_producer
+      - sens_producer
+    restart: always
+
