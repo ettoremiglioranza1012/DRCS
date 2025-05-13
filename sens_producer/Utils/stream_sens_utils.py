@@ -96,7 +96,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
     Returns:
         None
     """
-    print("\n[PRODUCER-STREAM-PROCESS]\n")
+    print("\n[SENS-PRODUCER-STREAM-PROCESS]\n")
     
     # Initialize Kafka Producer with retry logic
     bootstrap_servers = ['kafka:9092']
@@ -132,11 +132,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
 
             # Generate fake measurements for i-th station in microarea
             timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
-            list_of_mesdict = [
-                {
-                    "sens_meas_id": f"sens_meas_A{macroarea_i}-M{microarea_i}_{timestamp}"
-                }
-            ]
+            list_of_mesdict = list()
             
             logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")
             for i in range(n_stats):

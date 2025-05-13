@@ -59,14 +59,14 @@ services:
 
   img_producer:
     build:
-      context: ./imgproducer_m5
+      context: ./img_producer
     depends_on:
       - setup_orchestrator
     restart: always
 
   sens_producer:
     build:
-      context: ./sensproducer_m5
+      context: ./sens_producer
     depends_on:
       - setup_orchestrator
     restart: always
@@ -74,6 +74,14 @@ services:
   img_consumer:
     build:
       context: ./img_consumer
+    depends_on:
+      - img_producer
+      - sens_producer
+    restart: always
+  
+  sens_consumer:
+    build:
+      context: ./sens_consumer
     depends_on:
       - img_producer
       - sens_producer

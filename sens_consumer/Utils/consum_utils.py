@@ -33,11 +33,11 @@ def create_consumer(bootstrap_servers: list[str]) -> KafkaConsumer:
         Comment here!
     """
     consumer = KafkaConsumer(
-        'satellite_img',
+        'sensor_meas',
         bootstrap_servers=bootstrap_servers,
-        group_id='img-consumer-group',
+        group_id='sens-consumer-group',
         value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-        enable_auto_commit=False,
+        enable_auto_commit=True,
         auto_offset_reset='latest'
     )
 
@@ -68,33 +68,34 @@ def save_to_minio(msg_payload: dict, key: str, bucket_name:str, ContentType:str)
         raise
 
 
-def process_payload(msg_payload: dict) -> None:
+def process_payload(msg_payload: list[dict]) -> None:
     """
         Comment here 
     """
-    try:
-        img_payload_id = msg_payload['image_pointer']
-        save_to_minio(
-            msg_payload,
-            key=img_payload_id,
-            bucket_name='satellite-data-payload-backup',
-            ContentType='application/json'
-        )
+    
+    for record in msg_payload:
+        try:
+            meas_payload_id = f"{record['station_id']}_{record['timestamp']}"
+            save_to_minio(
+                msg_payload,
+                key=meas_payload_id,
+                bucket_name='sensor-stations-data-payload-backup',
+                ContentType='application/json'
+            )
+            logger.info(f"Saved sensors payload: {meas_payload_id}")
 
-        logger.info(f"Saved payload: {img_payload_id}")
-
-    except KeyError:
-        raise ValueError("Missing 'image_pointer' in payload.")
-    except Exception as e:
-        logger.error(f"Failed to process payload: {e}")
-        raise
+        except KeyError:
+            raise ValueError("Missing 'sens_meas_id' in payload.")
+        except Exception as e:
+            logger.error(f"Failed to process payload: {e}")
+            raise
 
 
 def stream_consumer() -> None:
     """
         Comment here!
     """
-    print("\n[IMG-CONSUMER-STREAM-PROCESS\n]")
+    print("\n[SENS-CONSUMER-STREAM-PROCESS\n]")
 
     # Initialize Kafka Producer with retry logic
     bootstrap_servers = ['kafka:9092']
@@ -115,14 +116,15 @@ def stream_consumer() -> None:
     while stream:
         try:
             for msg in consumer:
-                """__iter__() method of the KafkaConsumer object
+                """
+                __iter__() method of the KafkaConsumer object
                 This method internally calls the Kafka client’s poll() method in a loop, waiting for new messages.
-                code inside the for loop won’t execute until a message is available."""
+                code inside the for loop won’t execute until a message is available.
+                """
                 try:
                     logger.info(f"Received msg from partition key: {msg.key}")
                     process_payload(msg.value)
-                    consumer.commit()
-                    logger.info("Message commited successfully.\n")
+                    logger.info("Message auto-commited.\n")
                 except Exception as e:
                     logger.error(f"Process failed: {e} -> skipping commit\n")
             

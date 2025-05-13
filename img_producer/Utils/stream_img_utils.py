@@ -114,7 +114,7 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
     - The loop will wait for the remainder of a X-seconds interval to maintain consistent image intervals.
     - This function is designed to run indefinitely unless an error or empty image response occurs.
     """
-    print("\n[PRODUCER-STREAM-PROCESS]\n")
+    print("\n[IMG-PRODUCER-STREAM-PROCESS]\n")
 
     # Initialize SentinelHub Client
     config = SHConfig()
