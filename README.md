@@ -225,3 +225,8 @@ Just document the intent and apply topic-level configs at deployment time.
    - Delta Lake su MinIO per salvataggio persistente (layer Bronze/Silver/Gold)
 
 
+Developing notes:
+
+Maybe necessary
+ettor@LAPTOP-GTACQJV3 MINGW64 /c/Projects/DisasterPipeline/Dockeraize_DCRS/flink_sql_job (ettore)
+$ chmod +x wait-for-it.sh

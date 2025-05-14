@@ -14,6 +14,6 @@ bucket_names = [b['Name'] for b in buckets]
 
 if bucket_name not in bucket_names:
     s3.create_bucket(Bucket=bucket_name)
-    print(f"✅ Created bucket: {bucket_name}")
+    print(f"SUCCESS: Created bucket: {bucket_name}")
 else:
-    print(f"ℹ️  Bucket {bucket_name} already exists.")
+    print(f"Bucket {bucket_name} already exists.")
