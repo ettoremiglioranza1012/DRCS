@@ -173,7 +173,7 @@ def generate_pixel_data(lat: float, lon: float, macroarea_id: str, fire_probabil
     return pixel_json
 
 
-def firedet_bands_metadata(bbox_list: list, macroarea_id: str, n: int = 50, fire_probability: float = 0.2) -> dict:
+def firedet_bands_metadata(bbox_list: list, macroarea_id: str, n: int = 80, fire_probability: float = 0.2) -> dict:
     """
     Generate synthetic satellite pixel data for a geographic area.
     Randomly samples n pixels within the bounding box and computes whether

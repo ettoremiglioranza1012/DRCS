@@ -71,19 +71,35 @@ services:
       - setup_orchestrator
     restart: always
 
-  img_consumer:
+  create_buckets:
+    image: python:3.9
+    container_name: create_buckets
+    depends_on:
+      - minio
+    volumes:
+      - ./setup_minio:/scripts
+    working_dir: /scripts
+    command: ["sh", "-c", "pip install boto3 && python create_minio_bucket.py"]
+    restart: "no"
+
+  flink-jobmanager:
     build:
-      context: ./img_consumer
+      context: ./flink_sql_job
+    container_name: flink-jobmanager
     depends_on:
       - img_producer
       - sens_producer
-    restart: always
-  
-  sens_consumer:
-    build:
-      context: ./sens_consumer
+    ports:
+      - "8081:8081"
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+
+  flink-taskmanager:
+    image: flink:1.17.2-scala_2.12
+    container_name: flink-taskmanager
     depends_on:
-      - img_producer
-      - sens_producer
-    restart: always
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
 

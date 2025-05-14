@@ -2,7 +2,6 @@
 # Utilities
 from Utils.db_utils import connect_to_db
 import random
-import time
 
 
 def get_number_of_stats(macroarea_i: int, microarea_i:int) -> int:

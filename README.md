@@ -53,6 +53,7 @@ The **DCS** performs the following:
 - Additionally, every producer is right now capable of producing data only for a specific micro area out of all the micro areas in the macro area. This current set up is done due to the fact that when prototyping, we wanted to keep the system as simple as possible to avoid overhead. With proper hardware and a proper setup, the system can be easily extended to produce data for all microareas in a macro area. To do this, there are two possible ways:
   - Create a new producer for each micro area in the macro area. This is the easiest way to do it, but it requires a lot of manual work.
    - Create a new producer for each macro area, and then use the existing producers to produce data for all micro areas in the macro area, maybe through subprocessing or threads. This is a more complex solution, but it allows for more flexibility and scalability in the future.
+- Currently, the timestamp of the event satellite image is handled during serialisation. However, this removes the delay of the fetching phase from the timestamp, making things simpler, but more inacurate. To make things more precise, the timestamp should be taken before the fetch and the watermark interval should be wider than the current 10s, I think. 
 
 ---
 
@@ -148,7 +149,7 @@ docker-compose down -v --remove-orphans
 
 --- 
 
-Developer Notes: Message Durability and Design Choices
+**Developer Notes: Message Durability and Design Choices**
 -------------------------------------------------------
 
 Our disaster recovery system requires reliable, time-synchronized delivery of large satellite images.
@@ -175,7 +176,7 @@ To guarantee that **no image is lost or silently dropped**, we adopt the followi
 - This significantly improves robustness under load or during broker transitions, without requiring manual retry logic.
 - Retried sends still respect `acks='all'` and ISR guarantees — meaning no compromise on consistency.
 
-Kafka Producer Configuration Notes 
+**Kafka Producer Configuration Notes** 
 ----------------------------------
 
 This code uses `acks='all'` to ensure strong delivery guarantees.
@@ -197,5 +198,30 @@ Future Production Setup (Scalable):
 Note:
 Avoid overriding `min.insync.replicas` in development if using default broker configs.
 Just document the intent and apply topic-level configs at deployment time.
+
+**Flink consumer Configuration Notes**
+----------------------------------
+
+| Requisito della consegna                       | Cosa serve                              | Soluzione migliore                     |
+| ---------------------------------------------- | --------------------------------------- | -------------------------------------- |
+| Dati da **più fonti eterogenee e asincrone**   | Sincronizzazione flessibile             | `SLIDING WINDOW` o `HOP`               |
+| **Reattività ai cambiamenti** (alert)          | Aggiornamenti continui                  | finestra mobile da 15s                 |
+| **Allerta in tempo reale**                     | Non aspettare un minuto intero          | trigger rapido su livello rischio      |
+| **Visualizzazione dashboard aggiornata**       | Stato continuamente aggiornato          | output ogni 15s/30s con merge          |
+| Scrittura nel **data lakehouse**               | Snapshot coerenti, batch friendly       | finestra da 1m, ma derivata da sliding |
+| Compatibilità con **Spark**                    | Output strutturato e schedulabile       | scrittura via sink parquet/Delta       |
+| Eventi che possono **escalare** in tempo reale | Propagare l’evento più critico ricevuto | `MAX`, `LAST_VALUE`, UDF custom        |
+
+1. Sliding window ogni 15 secondi su intervallo di 1 minuto: 
+   - "HOP(ts, INTERVAL '15' SECOND, INTERVAL '1' MINUTE')"
+   - Ti permette di aggiornare la situazione ogni 15s, mentre osservi un intervallo di 1m.
+2. Logica di alert escalation:
+   - MAX(danger_level) per rilevare il peggior rischio nella finestra
+   - LAST_VALUE(...) per sapere cosa è successo da ultimo
+   - UDF opzionale per decidere se lo stato dell’evento è "evoluto"
+3. Join tra flussi filtrati e arricchiti, come discusso, su area e window_start.
+4. Output verso:
+   - Kafka per aggiornare in tempo reale la dashboard
+   - Delta Lake su MinIO per salvataggio persistente (layer Bronze/Silver/Gold)
 
 
