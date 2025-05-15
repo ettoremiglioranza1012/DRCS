@@ -82,17 +82,6 @@ def generate_measurements_json(
                 "battery_voltage": round(random.uniform(3.4, thresholds["battery_voltage"]), 2)
             }
 
-            metadata = {
-                "wildfire_detected": True,
-                "smoke_detected": True,
-                "flame_detected_ir": True,
-                "severity_score": round(random.uniform(0.6, 1.0), 2),
-                "detection_confidence": round(random.uniform(0.75, 0.99), 2),
-                "air_quality_index": round(random.uniform(150, 300), 1),
-                "anomaly_detected": True,
-                "anomaly_type": "wildfire"
-            }
-
         else:
             # Normal conditions
             safe_upper = {key: val * margin for key, val in thresholds.items()}
@@ -106,33 +95,10 @@ def generate_measurements_json(
                 "battery_voltage": round(random.uniform(3.4, safe_upper["battery_voltage"]), 2)
             }
 
-            metadata = {
-                "wildfire_detected": False,
-                "smoke_detected": False,
-                "flame_detected_ir": False,
-                "severity_score": 0.0,
-                "detection_confidence": 0.0,
-                "air_quality_index": None,
-                "anomaly_detected": False,
-                "anomaly_type": None
-            }
-
         data = {
             "station_id": f"S_A{macroarea_i}-M{microarea_i}_{stations_i:03}",
             "timestamp": timestamp,
-
             "measurements": measurements,
-
-            "metadata": {
-                "detection": metadata
-            },
-
-            "system_response": {
-                "event_triggered": "wildfire_alert" if fire_event else None,
-                "response_timestamp": None,
-                "action_taken": None,
-                "automated": True
-            }
         }
         
         return data

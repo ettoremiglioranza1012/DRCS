@@ -3,6 +3,7 @@
 from Utils.geo_sens_utils import *
 from kafka.errors import KafkaError
 from kafka import KafkaProducer
+from datetime import datetime
 import logging
 import time
 import json
@@ -131,7 +132,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                 continue
 
             # Generate fake measurements for i-th station in microarea
-            timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+            timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
             records = list()
             
             logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")
