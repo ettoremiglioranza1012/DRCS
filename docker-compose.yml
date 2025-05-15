@@ -9,6 +9,8 @@ services:
       POSTGRES_DB: california_db
     ports:
       - "5433:5432"
+    networks:
+      - dcrs_net
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -18,6 +20,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - dcrs_net
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -34,6 +38,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+    networks:
+      - dcrs_net
 
   minio:
     image: minio/minio:latest
@@ -46,6 +52,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     restart: unless-stopped
+    networks:
+      - dcrs_net
 
   setup_orchestrator:
     build:
@@ -56,6 +64,8 @@ services:
       - zookeeper
       - minio
     restart: "no"  # exit after success
+    networks:
+      - dcrs_net
 
   img_producer:
     build:
@@ -63,6 +73,8 @@ services:
     depends_on:
       - setup_orchestrator
     restart: always
+    networks:
+      - dcrs_net
 
   sens_producer:
     build:
@@ -70,6 +82,8 @@ services:
     depends_on:
       - setup_orchestrator
     restart: always
+    networks:
+      - dcrs_net
 
   create_buckets:
     image: python:3.9
@@ -81,53 +95,28 @@ services:
     working_dir: /scripts
     command: ["sh", "-c", "pip install boto3 && python create_minio_buckets.py"]
     restart: "no"
+    networks:
+      - dcrs_net
 
-  jobmanager:
-    image: flink:1.18.0-scala_2.12-java11
-    container_name: jobmanager
-    environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - S3_ENDPOINT=http://minio:9000
-      - S3_PATH_STYLE_ACCESS=true
-    ports:
-      - "8081:8081"
+  flink_jobmanager:
+    build:
+      context: ./flink_job
+    container_name: flink_jobmanager
     depends_on:
+      - setup_orchestrator
       - kafka
       - zookeeper
       - minio
-      - img_producer
-      - sens_producer
-    command: bash /opt/flink/wait-for-it.sh
-    volumes:
-      - ./flink_sql_job/jars/flink-sql-connector-mysql-cdc-2.4.1.jar:/opt/flink/lib/flink-sql-connector-mysql-cdc-2.4.1.jar
-      - ./flink_sql_job/jars/flink-connector-jdbc-3.1.0-1.17.jar:/opt/flink/lib/flink-connector-jdbc-3.1.0-1.17.jar
-      - ./flink_sql_job/jars/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar:/opt/flink/lib/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar
-      - ./flink_sql_job/jars/flink-s3-fs-hadoop-1.17.1.jar:/opt/flink/lib/flink-s3-fs-hadoop-1.17.1.jar
-      - ./flink_sql_job/jars/iceberg-flink-runtime-1.17-1.4.2.jar:/opt/flink/lib/iceberg-flink-runtime-1.17-1.4.2.jar
-      - ./flink_sql_job/core-site.xml:/opt/flink/conf/core-site.xml
-      - ./flink_sql_job/jobs/job.sql:/opt/flink/job.sql
-      - ./flink_sql_job/wait-for-it.sh:/opt/flink/wait-for-it.sh
     restart: on-failure
-
-  taskmanager:
-    image: flink:1.18.0
-    container_name: taskmanager
+    networks:
+      - dcrs_net
     environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
-      - S3_ENDPOINT=http://minio:9000
-      - S3_PATH_STYLE_ACCESS=true
-    depends_on:
-      - jobmanager
-    command: taskmanager
-    volumes:
-      - ./flink_sql_job/jars/flink-sql-connector-mysql-cdc-2.4.1.jar:/opt/flink/lib/flink-sql-connector-mysql-cdc-2.4.1.jar
-      - ./flink_sql_job/jars/flink-connector-jdbc-3.1.0-1.17.jar:/opt/flink/lib/flink-connector-jdbc-3.1.0-1.17.jar
-      - ./flink_sql_job/jars/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar:/opt/flink/lib/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar
-      - ./flink_sql_job/jars/flink-s3-fs-hadoop-1.17.1.jar:/opt/flink/lib/flink-s3-fs-hadoop-1.17.1.jar
-      - ./flink_sql_job/jars/iceberg-flink-runtime-1.17-1.4.2.jar:/opt/flink/lib/iceberg-flink-runtime-1.17-1.4.2.jar
+    command: /opt/wait-for-it.sh
+
+networks:
+  dcrs_net:
+    driver: bridge
 
 
