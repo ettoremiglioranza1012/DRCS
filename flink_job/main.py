@@ -7,9 +7,7 @@ from pyflink.datastream.window import TumblingEventTimeWindows
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
 from pyflink.common.time import Duration
-from pyflink.datastream.functions import ProcessWindowFunction, RuntimeContext, MapFunction
-from pyflink.datastream.state import ValueStateDescriptor
-from pyflink.table import Row
+from pyflink.datastream.functions import ProcessWindowFunction, MapFunction
 
 from datetime import datetime
 import random

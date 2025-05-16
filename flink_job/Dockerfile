@@ -6,6 +6,8 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 
 RUN pip3 install apache-flink==1.17.0 boto3
 
+RUN pip3 install redis
+
 COPY main.py /opt/main.py
 
 COPY flink-connector-kafka-1.17.0.jar /opt/flink/lib/
