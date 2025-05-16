@@ -8,6 +8,7 @@ import numpy as np
 import logging
 import random
 import boto3
+import uuid
 import time
 import json
 import io
@@ -84,7 +85,18 @@ def save_image_in_S3(image_bytes: bytes, timestamp: str, macroarea_id: str, micr
     """
     bucket_name = "satellite-imgs"
     image_file_id = f"sat_img_{macroarea_id}_{microarea_id}_{timestamp}"
-    object_key = f"{image_file_id}.jpg"
+    
+    # Extract date for partitioned path
+    year_month_day = timestamp.split("T")[0]  # YYYY-MM-DD
+    year = year_month_day.split("-")[0]
+    month = year_month_day.split("-")[1]
+    day = year_month_day.split("-")[2]
+    
+    # Unique uuid hex code
+    unique_id = uuid.uuid4().hex[:8]
+    
+    # Unique Img ID
+    object_key = f"sat_imgs/year={year}/month={month}/day={day}/{image_file_id}_{unique_id}.jpg"
 
     # Make sure the bucket exists
     try:
@@ -102,7 +114,7 @@ def save_image_in_S3(image_bytes: bytes, timestamp: str, macroarea_id: str, micr
         )
         logger.info(f"Uploaded to bucket '{bucket_name}' at key '{object_key}'")
 
-        return image_file_id
+        return object_key
 
     except Exception as e:
         raise SystemError(f"[ERROR] Failed to store image with image_id={image_file_id}, Error: {e}")

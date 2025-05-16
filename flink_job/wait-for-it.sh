@@ -13,7 +13,7 @@ wait_for_service() {
   local host=$2
   local port=$3
 
-  echo "🕐 Waiting for $name at $host:$port..."
+  echo "Waiting for $name at $host:$port..."
   for i in $(seq 1 $TIMEOUT); do
     if timeout 1 bash -c "</dev/tcp/$host/$port" 2>/dev/null; then
       echo "$name is up!"
@@ -22,7 +22,7 @@ wait_for_service() {
     sleep 1
   done
 
-  echo "❌ Timeout waiting for $name at $host:$port"
+  echo "Timeout waiting for $name at $host:$port"
   exit 1
 }
 

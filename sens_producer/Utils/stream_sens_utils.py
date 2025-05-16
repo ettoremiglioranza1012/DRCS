@@ -132,7 +132,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                 continue
 
             # Generate fake measurements for i-th station in microarea
-            timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
             records = list()
             
             logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")

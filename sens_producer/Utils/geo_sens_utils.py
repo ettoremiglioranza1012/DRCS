@@ -104,6 +104,6 @@ def generate_measurements_json(
         return data
     
     except Exception as e:
-        raise SystemError(f"Failed to generate measuremetns for station 'S_M{macroarea_i}-m{microarea_i}_{stations_i:03}', error: {e}")
+        raise SystemError(f"Failed to generate measurements for station 'S_M{macroarea_i}-m{microarea_i}_{stations_i:03}', error: {e}")
     
     
