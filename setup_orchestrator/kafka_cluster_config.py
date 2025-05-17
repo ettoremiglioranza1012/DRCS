@@ -66,4 +66,3 @@ def kafka_cluster_config() -> None:
 if __name__ == "__main__":
     kafka_cluster_config()
 
-

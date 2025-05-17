@@ -213,4 +213,3 @@ def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bb
 
     return img_payload_prod
     
-

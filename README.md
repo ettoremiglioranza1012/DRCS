@@ -188,6 +188,7 @@ Current Development Setup:
 - min.insync.replicas = 1 (default)
 - acks = 'all' behaves like acks = '1' (only the leader exists)
 - Synchronous send (`future.get()`) ensures message delivery or raises exceptio
+
 Future Production Setup (Scalable):
 - Brokers: 3+
 - replication.factor = 3+
@@ -202,31 +203,84 @@ Just document the intent and apply topic-level configs at deployment time.
 **Flink consumer Configuration Notes**
 ----------------------------------
 
-| Requisito della consegna                       | Cosa serve                              | Soluzione migliore                     |
-| ---------------------------------------------- | --------------------------------------- | -------------------------------------- |
-| Dati da **più fonti eterogenee e asincrone**   | Sincronizzazione flessibile             | `SLIDING WINDOW` o `HOP`               |
-| **Reattività ai cambiamenti** (alert)          | Aggiornamenti continui                  | finestra mobile da 15s                 |
-| **Allerta in tempo reale**                     | Non aspettare un minuto intero          | trigger rapido su livello rischio      |
-| **Visualizzazione dashboard aggiornata**       | Stato continuamente aggiornato          | output ogni 15s/30s con merge          |
-| Scrittura nel **data lakehouse**               | Snapshot coerenti, batch friendly       | finestra da 1m, ma derivata da sliding |
-| Compatibilità con **Spark**                    | Output strutturato e schedulabile       | scrittura via sink parquet/Delta       |
-| Eventi che possono **escalare** in tempo reale | Propagare l’evento più critico ricevuto | `MAX`, `LAST_VALUE`, UDF custom        |
+### Current Implementation
 
-1. Sliding window ogni 15 secondi su intervallo di 1 minuto: 
-   - "HOP(ts, INTERVAL '15' SECOND, INTERVAL '1' MINUTE')"
-   - Ti permette di aggiornare la situazione ogni 15s, mentre osservi un intervallo di 1m.
-2. Logica di alert escalation:
-   - MAX(danger_level) per rilevare il peggior rischio nella finestra
-   - LAST_VALUE(...) per sapere cosa è successo da ultimo
-   - UDF opzionale per decidere se lo stato dell’evento è "evoluto"
-3. Join tra flussi filtrati e arricchiti, come discusso, su area e window_start.
-4. Output verso:
-   - Kafka per aggiornare in tempo reale la dashboard
-   - Delta Lake su MinIO per salvataggio persistente (layer Bronze/Silver/Gold)
+* **Retry Logic**
+  Implemented robust retry strategies for connecting Flink to all dependent services (Redis, MinIO, Kafka, etc.) after container startup. Ensures full system readiness via a single `docker-compose up`, with no manual intervention required.
 
+* **Raw Data Ingestion – Bronze Layer**
+  Incoming raw sensor data is streamed and persisted to an S3-compatible MinIO data lake, under the `bronze` bucket. No transformation is applied at this stage.
 
-Developing notes:
+* **Windowed Processing in Flink**
+
+  * Tumbling window of **1 minute**.
+  * **Watermark** strategy: 5 seconds.
+  * Grouped by `station_id`.
+  * Uses **event timestamp** (not processing time), providing a more realistic and meaningful temporal basis despite the added complexity.
+
+* **Anomaly Filtering + Aggregation**
+
+  * Data is processed **in parallel per `station_id`** within each window.
+  * A set of hard-coded threshold-based rules filters the data.
+  * Only measurements exceeding thresholds are kept.
+  * For those, a **mean aggregation** is computed → results in **one JSON per minute per station with anomalies**.
+
+  #### Design Rationale
+
+  This approach is ideal for wildfire and environmental monitoring:
+
+  * 🔻 **Efficient Volume Reduction**: Detailed data from stations with normal readings is discarded, reducing payload size.
+  * 👁 **Maintained Situational Awareness**: All stations are tracked—whether they report anomalies or not.
+  * 📍 **Complete Metadata**: Both normal and anomaly records include metadata for spatial context.
+  * ⚠️ **Clear Status Indicators**: Differentiation between normal and anomaly records via `status`/`message` vs. `measurements`/`detection_flags`.
+  * 🕒 **Timestamp Preservation**: Timestamps are kept in both cases to ensure temporal continuity.
+
+  The current design strikes the right balance:
+
+  * Keeps “heartbeat” data for normal stations (they’re alive and reporting).
+  * Preserves full measurement detail only when anomalies are detected.
+  * Enables temporal and spatial analysis across all stations.
+
+* **Enrichment via Redis (In-Memory)**
+
+  * A Redis container is integrated into the system.
+  * Dimensional metadata is preloaded into Redis at startup.
+  * Flink queries Redis during stream processing for super-fast enrichment, with full retry logic ensuring reliability.
+
+---
+
+### Next Steps
+
+* [ ] **Silver Layer Output**
+  Save the enriched, per-minute anomaly summaries into the MinIO `silver` bucket for persistent storage and downstream usage.
+
+* [ ] **Gold Layer Aggregation**
+
+  * Aggregate all per-minute enriched records into a **single JSON per minute**.
+  * Compute a **severity score**, based on:
+
+    * The degree to which measurements exceed thresholds.
+    * The proportion of affected stations out of the total.
+  * (Optional) Add enrichment such as:
+
+    * Geographic bounding boxes for event area.
+    * Nearby facilities or infrastructure that may require evacuation.
+    * Vegetation type and density.
+  * (Optional) Enable automatic response logic (e.g. alerts to firefighters or civilians).
+
+* [ ] **Forecasting & Advanced Augmentation (Optional)**
+
+  * Integrate **weather forecast APIs** (Gino is already exploring this for early warning features).
+  * Use forecasted and real-time data in the **severity score computation**.
+  * (Very Optional) Add **unsupervised ML models** (e.g. anomaly detection, decision trees) to support detection of unusual event patterns and severity scoring.
+
+---
+
+Notes (To remove):
 
 Maybe necessary
 ettor@LAPTOP-GTACQJV3 MINGW64 /c/Projects/DisasterPipeline/Dockeraize_DCRS/flink_sql_job (ettore)
 $ chmod +x wait-for-it.sh
+
+Tot line of code= roughly 3500 lines of code
+

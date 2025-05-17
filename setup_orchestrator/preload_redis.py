@@ -1,3 +1,4 @@
+
 # Utilities
 from Utils.db_utils import connect_to_db
 import redis
@@ -5,12 +6,12 @@ import json
 import os
 import sys
 
-# -----------------------------------------------------------
-# Purpose:
-# This script loads dimensional metadata about sensor stations 
-# from PostgreSQL into Redis. Redis is used as a fast key-value
-# store to enable real-time enrichment of sensor streams in Flink.
-# -----------------------------------------------------------
+"""
+    Purpose:
+    This script loads dimensional metadata about sensor stations 
+    from PostgreSQL into Redis. Redis is used as a fast key-value
+    store to enable real-time enrichment of sensor streams in Flink.
+"""
 
 try:
     # Connecting to PostgreSQL

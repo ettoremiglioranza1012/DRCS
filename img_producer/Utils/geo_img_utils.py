@@ -317,4 +317,3 @@ def plot_image(image: np.ndarray, factor: float = 3.5/255, clip_range: Tuple[flo
 
     plt.show()
 
-
