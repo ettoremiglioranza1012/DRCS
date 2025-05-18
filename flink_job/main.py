@@ -1236,69 +1236,29 @@ def wait_for_minio_ready(
         secret_key: The MinIO secret key for authentication
         max_retries: Maximum number of connection attempts (default: 20)
         retry_interval: Time in seconds between retry attempts (default: 5)
-        
-    Returns:
-        None: Returns silently when MinIO is ready
-        
-    Raises:
-        Exception: If MinIO is not ready after all retry attempts
-        
-    Example:
-        >>> wait_for_minio_ready("localhost:9000", "minio", "minio123")
     """
-    if not endpoint:
-        raise ValueError("MinIO endpoint cannot be empty")
-    
-    if max_retries < 1:
-        raise ValueError("max_retries must be at least 1")
-        
-    if retry_interval < 1:
-        raise ValueError("retry_interval must be at least 1 second")
-    
-    logger.info(f"Waiting for MinIO to be ready at endpoint: {endpoint}")
-    
-    for attempt in range(1, max_retries + 1):
+    for i in range(max_retries):
         try:
-            # Create S3 client with MinIO configuration
             s3 = boto3.client(
                 's3',
                 endpoint_url=f"http://{endpoint}",
                 aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
-                # Add connection timeout to prevent hanging indefinitely
-                config=boto3.session.Config(connect_timeout=10, read_timeout=10)
+                aws_secret_access_key=secret_key
             )
-            
-            # Attempt to list buckets to verify connectivity
-            response = s3.list_buckets()
-            bucket_count = len(response.get('Buckets', []))
-            
-            logger.info(f"MinIO is ready! Found {bucket_count} buckets.")
+            s3.list_buckets()  # just ping
+            logger.info("[INFO] MinIO is ready")
             return
-            
-        except boto3.exceptions.EndpointConnectionError as e:
-            logger.warning(f"MinIO connection error (attempt {attempt}/{max_retries}): {str(e)}")
-        except boto3.exceptions.ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-            logger.warning(f"MinIO client error: {error_code} (attempt {attempt}/{max_retries}): {str(e)}")
         except Exception as e:
-            logger.warning(f"MinIO not ready (attempt {attempt}/{max_retries}): {str(e)}")
-        
-        # Only sleep if this isn't the last attempt
-        if attempt < max_retries:
-            logger.debug(f"Waiting {retry_interval} seconds before retry...")
+            logger.warning(f"[WARN] MinIO not ready (attempt {i+1}/{max_retries}): {e}")
             time.sleep(retry_interval)
-    
-    logger.error(f"MinIO is not ready after {max_retries} attempts")
-    raise Exception(f"MinIO service at {endpoint} is not ready after {max_retries} retry attempts")
+    raise Exception("[ERROR] MinIO is not ready after retries")
 
 
 def wait_for_kafka_ready(
     bootstrap_servers: Union[str, List[str]], 
     max_retries: int = 30, 
     retry_interval: int = 10,
-    timeout: int = 10
-) -> bool:
+) -> None:
     """
     Wait for Kafka cluster to be ready and accessible.
     
@@ -1310,64 +1270,20 @@ def wait_for_kafka_ready(
         bootstrap_servers: Kafka broker address(es) as string or list of strings
         max_retries: Maximum number of connection attempts (default: 30)
         retry_interval: Time in seconds between retry attempts (default: 10)
-        timeout: Connection timeout in seconds (default: 10)
-        
-    Returns:
-        bool: True if Kafka is ready
-        
-    Raises:
-        ValueError: If invalid parameters are provided
-        Exception: If Kafka is not ready after all retry attempts
     """
-    if not bootstrap_servers:
-        raise ValueError("Kafka bootstrap_servers cannot be empty")
-    
-    if max_retries < 1:
-        raise ValueError("max_retries must be at least 1")
-        
-    if retry_interval < 1:
-        raise ValueError("retry_interval must be at least 1 second")
-    
-    # Normalize bootstrap_servers to string for logging
-    logger.info(f"Waiting for Kafka to be ready")
-    
-    for attempt in range(1, max_retries + 1):
-        admin_client = None
+
+    for i in range(max_retries):
         try:
-            # Create Kafka admin client
-            admin_client = KafkaAdminClient(
-                bootstrap_servers=bootstrap_servers,
-                client_id=f"kafka-readiness-check",
-                request_timeout_ms=timeout * 1000,  # Convert to milliseconds
-                connections_max_idle_ms=timeout * 2 * 1000  # Double the timeout for idle connections
-            )
-            
-            # Attempt to list topics to verify connectivity
-            topics = admin_client.list_topics()
-            topic_count = len(topics) if topics else 0
-            
-            logger.info(f"Kafka cluster is ready!")
+            admin_client = KafkaAdminClient(bootstrap_servers=bootstrap_servers)
+            admin_client.list_topics() # just ping
+            admin_client.close()
+            print("Kafka cluster is ready")
             return True
-            
-        except (ConnectionError, TimeoutError) as e:
-            logger.warning(f"Kafka connection error (attempt {attempt}/{max_retries}): {str(e)}")
         except Exception as e:
-            logger.warning(f"Kafka not ready (attempt {attempt}/{max_retries}): {str(e)}")
-        finally:
-            # Ensure admin client is properly closed
-            if admin_client:
-                try:
-                    admin_client.close()
-                except Exception as e:
-                    logger.debug(f"Error closing Kafka admin client: {str(e)}")
-        
-        # Only sleep if this isn't the last attempt
-        if attempt < max_retries:
-            logger.debug(f"Waiting {retry_interval} seconds before retry...")
+            print(f"Kafka not ready (attempt {i+1}/{max_retries}): {e}")
             time.sleep(retry_interval)
     
-    logger.error(f"Kafka is not ready after {max_retries} attempts")
-    raise Exception(f"Kafka cluster at {servers_str} is not ready after {max_retries} retry attempts")
+    raise Exception("Kafka cluster not yet configured after maximum retries")
 
 
 def main():
@@ -1444,3 +1360,4 @@ def main():
 if __name__ == "__main__":
     main()
 
+# BIG PROBLEM WITH SEVERITY SCORE COMPUTATION
