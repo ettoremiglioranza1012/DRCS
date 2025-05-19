@@ -40,6 +40,7 @@ import logging
 import random
 import redis
 import boto3
+import math
 import time
 import json
 import uuid
@@ -160,7 +161,8 @@ class JsonTimestampAssigner(TimestampAssigner):
         
         Args:
             value (str): JSON string containing sensor data
-            record_timestamp (int): Default timestamp provided by Flink
+            record_timestamp (int): Default timestamp provided by Flink, not used since
+            with time event we are giving to Flink our recorded timestamp as timestamp assigner.
             
         Returns:
             int: Timestamp in milliseconds since epoch
@@ -178,7 +180,7 @@ class S3MinIOSinkBase(MapFunction):
     Base class for MinIO (S3) data persistence functionality.
     
     Provides common functionality for saving data to MinIO in the
-    lambda architecture layers (bronze, silver, gold).
+    lakahouse architecture layers (bronze, silver, gold).
     """
 
     def __init__(self) -> None:
@@ -220,10 +222,10 @@ class S3MinIOSinkBase(MapFunction):
             bucket_name: Target MinIO bucket
             partition: Top-level partition name
         """
-        # Clean timestamp
-        timestamp = timestamp.replace(":", "-")
-        
         try:
+            # Clean timestamp
+            timestamp = timestamp.replace(":", "-")
+            
             # Extract date for partitioned path
             year_month_day = timestamp.split("T")[0]  # YYYY-MM-DD
             year = year_month_day.split("-")[0]
@@ -330,7 +332,7 @@ class S3MinIOSinkGold(S3MinIOSinkBase):
     """
     MinIO sink for aggregated (gold) data layer.
     
-    Persists aggregated and enriched data to the gold data layer in MinIO,
+    Persists analytics-ready data to the gold data layer in MinIO,
     separating normal readings from wildfire events.
     """
 
@@ -376,6 +378,7 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
     1. Checks if any measurements exceed configured thresholds
     2. If any exceed thresholds, computes means of measurements across the window
     3. Adds detection flags for wildfire detection
+    4. Return health check ping from normal stations, allowing also FP, FN readings.
     
     Args:
         thresholds: Dictionary of measurement thresholds to compare against
@@ -401,6 +404,8 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
             
         Returns:
             List[str]: List containing either an anomaly detection or normal status message
+        
+        Notes: This class doesn't maintain state between window processing calls.
         """
         filtered_results = []
         raw_json_objects = []
@@ -927,7 +932,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
                                      if k != "battery_voltage"])
 
         # Compute severity score and related metrics
-        severity_score, critical_value_quota = self._calculate_severity_score(
+        severity_score = self._calculate_severity_score(
             anomalous_stations_count, total_stations_count,
             anomalous_fields_counts, anomalous_avgs_values,
             max_critical_meas, number_of_measurements)
@@ -1006,13 +1011,16 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
             for field in anomalous_measurements_accumulator.keys()
         }
     
+
     def _calculate_severity_score(self, anomalous_stations_count: int, total_stations_count: int,
-                                 anomalous_fields_counts: Dict[str, int],
-                                 anomalous_avgs_values: Dict[str, float],
-                                 max_critical_meas: Dict[str, float],
-                                 number_of_measurements: int) -> Tuple[float, float]:
+                             anomalous_fields_counts: Dict[str, int],
+                             anomalous_avgs_values: Dict[str, float],
+                             max_critical_meas: Dict[str, float],
+                             number_of_measurements: int) -> Tuple[float, float]:
         """
         Calculate severity score based on anomalous stations ratio and measurement criticality.
+        At the begging didn't work well so we improved several aspects adding a boost for low ratio
+        levels and a general exponential behaviour.
         
         Args:
             anomalous_stations_count: Number of stations that detected anomalies
@@ -1025,7 +1033,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
         Returns:
             Tuple[float, float]: Severity score and critical value quota
         """
-        # Compute critical value quota based on measurements
+        # Compute critical value quota based on measurements with increased weights
         if len(anomalous_fields_counts) > 0 and number_of_measurements > 0:
             critical_value_quota = 0
             for field, max_value in max_critical_meas.items():
@@ -1036,11 +1044,12 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
                 # Special case for humidity (Lower is worse)
                 if field == "humidity_percent":
                     ratio = anomalous_avgs_values[avg_key] / max_value if max_value > 0 else 1
-                    critical_value_quota += (1-ratio) * (1/number_of_measurements)
-                    """
-                    1 - ratio serves to transform a "low value = worse" into an indicator of increasing criticality, 
-                    keeping the logic uniform with the other parameters where 'high value = worse.
-                    """
+                    # Increased weight for humidity as it's critical for fire risk
+                    critical_value_quota += (1-ratio) * (1.5/number_of_measurements)
+                elif field == "temperature_c":
+                    # Increased weight for temperature as well
+                    ratio = anomalous_avgs_values[avg_key] / max_value if max_value > 0 else 0
+                    critical_value_quota += ratio * (1.3/number_of_measurements)
                 else:
                     # Current value / maximum value (higher ratio = worse)
                     ratio = anomalous_avgs_values[avg_key] / max_value if max_value > 0 else 0
@@ -1048,14 +1057,86 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
         else:
             critical_value_quota = 0
         
-        # Calculate final severity score
+        # Calculate station ratio
         stations_ratio = anomalous_stations_count / total_stations_count if total_stations_count > 0 else 0
-        severity_score = stations_ratio * 0.4 + (critical_value_quota * 0.6) 
+        
+        # Apply more aggressive exponential scaling to the stations ratio
+        k = 8.0  # More aggressive scaling
+        adjusted_stations_ratio = 1.0 - math.exp(-k * stations_ratio) if stations_ratio > 0 else 0
+        
+        # Apply a minimum floor based on station ratio
+        # Even a small percentage of stations detecting fire should yield meaningful severity
+        if stations_ratio >= 0.05:  # 5% of stations
+            min_station_score = 0.4  # Minimum score for any detected fire covering 5% of stations
+            #   - When stations_ratio == 0.05, the expression evaluates to 0.4.
+            #   - When stations_ratio > 0.05, the expression becomes greater than 0.4.
+            adjusted_stations_ratio = max(adjusted_stations_ratio, min_station_score * (stations_ratio / 0.05))
+
+        # Calculate base severity score with adjusted weighting
+        # Give more weight to critical measurements
+        base_severity_score = adjusted_stations_ratio * 0.55 + (critical_value_quota * 0.45)
+        
+        # Enhanced boost for critical fire indicators
+        has_high_temp = anomalous_avgs_values.get("anom_avg_temperature_c", 0) > max_critical_meas.get("temperature_c", 100) * 0.7
+        has_low_humidity = anomalous_avgs_values.get("anom_avg_humidity_percent", 100) < max_critical_meas.get("humidity_percent", 0) * 0.3
+        has_smoke = anomalous_avgs_values.get("anom_avg_smoke_index", 0) > max_critical_meas.get("smoke_index", 100) * 0.5
+        
+        # Count critical indicators
+        critical_indicators = sum([has_high_temp, has_low_humidity, has_smoke])
+        
+        # Aggressive boost that maintains significant effect even for moderate station coverage
+        if critical_indicators >= 2 and stations_ratio > 0:
+            # Higher boost baseline
+            base_boost = 0.15 * critical_indicators  # 0.3 for 2 indicators, 0.45 for 3, 0.6 for all 4
+            # Diminishing factor - provides boost even at moderate coverage
+            max_boost_threshold = 0.6  # Keep boosting meaningfully until 60% coverage
+            # Calculate boost factor with diminishing effect
+            boost_scale = max(0.3, 1 - (stations_ratio / max_boost_threshold))  # Never below 30% of max boost
+            """
+            | `stations_ratio` | Computed Boost | Final `boost_scale` |
+            | ---------------- | -------------- | ------------------- |
+            | 0.00             | 1.00           | 1.0                 |
+            | 0.10             | 0.80           | 0.8                 |
+            | 0.25             | 0.50           | 0.5                 |
+            | 0.50             | 0.00           | 0.3 (min clamp)     |
+            | 0.60             | -0.20          | 0.3 (min clamp)     |
+            """
+            # Apply the enhanced boost
+            effective_boost = base_boost * boost_scale
+            """
+            | `critical_indicators` | `stations_ratio` | `base_boost` | `boost_scale` | `effective_boost` | `severity_score`               |
+            | --------------------- | ---------------- | ------------ | ------------- | ----------------- | ------------------------------ |
+            | 2                     | 0.00             | 0.30         | 1.00          | 0.30              | 0.7 * 1.3 = 0.91               |
+            | 2                     | 0.25             | 0.30         | 0.5833        | 0.175             | 0.7 * 1.175 ≈ 0.823            |
+            | 2                     | 0.60             | 0.30         | 0.30          | 0.09              | 0.7 * 1.09 = 0.763             |
+            | 3                     | 0.10             | 0.45         | 0.8333        | 0.375             | 0.7 * 1.375 = 0.962            |
+            | 3                     | 0.60             | 0.45         | 0.30          | 0.135             | 0.7 * 1.135 = 0.795            |
+            """
+            # Apply the scaled boost
+            severity_score = min(base_severity_score * (1.0 + effective_boost), 1.0)
+        else:
+            severity_score = base_severity_score
+        
+        # Apply an additional California wildfire context modifier
+        # Based on environmental conditions that make California fires particularly dangerous
+        env_context = ENVIRONMENTAL_CONTEXT
+        is_dry_season = env_context.get("anom_avg_humidity_percent", 50) < 30
+        if env_context["terrain_info"].get("vegetation_density") == "high":
+            has_fuel_load = True  # Assume California woods have high fuel load
+        elif env_context["terrain_info"].get("vegetation_density") == "medium":
+            has_fuel_load = True
+        else:
+            has_fuel_load = False
+        
+        if is_dry_season and has_fuel_load and stations_ratio >= 0.1:
+            # California-specific context boost for fires detected by at least 10% of stations
+            cal_context_boost = 0.15  # 15% boost for California wildfire context
+            severity_score = min(severity_score * (1 + cal_context_boost), 1.0)
         
         # Cap at 1.0 and round
         severity_score = min(round(severity_score, 2), 1.0)
         
-        return severity_score, critical_value_quota
+        return severity_score
     
     def _calculate_air_quality(self, anomalous_measurements_accumulator: Dict[str, float],
                               anomalous_fields_counts: Dict[str, int]) -> Tuple[Optional[float], str]:
