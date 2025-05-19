@@ -98,6 +98,15 @@ services:
     networks:
       - dcrs_net
 
+  msg_producer:
+    build:
+      context: ./msg_producer
+    depends_on:
+      - setup_orchestrator
+    restart: always
+    networks:
+      - dcrs_net
+
   create_buckets:
     image: python:3.9
     container_name: create_buckets
@@ -128,6 +137,21 @@ services:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - MINIO_ENDPOINT=minio:9000
+
+  nlp_microservice:
+    build:
+      context: ./nlp_microservice
+    container_name: nlp_microservice
+    ports:
+      - "8000:8000"
+    networks:
+      - dcrs_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 networks:
   dcrs_net:

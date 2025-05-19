@@ -49,12 +49,13 @@ def kafka_cluster_config() -> None:
     # Define only two topics
     topics = [
         NewTopic(name="satellite_img", num_partitions=n_macros, replication_factor=1),
-        NewTopic(name="sensor_meas", num_partitions=n_macros, replication_factor=1)
+        NewTopic(name="sensor_meas", num_partitions=n_macros, replication_factor=1),
+        NewTopic(name="social_msg", num_partitions=n_macros, replication_factor=1)
     ]
 
     try:
         admin.create_topics(new_topics=topics, validate_only=False, timeout_ms=120000)
-        print("[INFO] Successfully created satellite_img and sensor_meas topics.")
+        print("[INFO] Successfully created satellite_img, sensor_meas and social_msg topics.")
 
         expected_partitions = {topic.name: topic.num_partitions for topic in topics}
         verify_topics(admin, expected_partitions)
