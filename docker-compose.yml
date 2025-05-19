@@ -111,10 +111,10 @@ services:
     networks:
       - dcrs_net
 
-  flink_jobmanager:
+  iot_flink_jobmanager:
     build:
-      context: ./flink_job
-    container_name: flink_jobmanager
+      context: ./iot_flink_job
+    container_name: iot_flink_jobmanager
     depends_on:
       - setup_orchestrator
       - kafka
