@@ -43,7 +43,7 @@ MINIO_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin")
 
 # NLP microservice configuration
-NLP_SERVICE_URL = os.environ.get("NLP_SERVICE_URL", "http://nlp-service:8000/classify")
+NLP_SERVICE_URL = os.environ.get("NLP_SERVICE_URL", "http://nlp_service:8000/classify")
 NLP_MAX_RETRIES = 3
 NLP_RETRY_DELAY = 1  # seconds
 
@@ -248,33 +248,33 @@ class SendToNLPProcessWindowFunction(ProcessWindowFunction):
             # Implement retry logic
             for attempt in range(NLP_MAX_RETRIES):
                 try:
-                    logger.info(f"Sending batch of {len(json_elements)} messages to NLP service (attempt {attempt+1})")
+                    print(f"Sending batch of {len(json_elements)} messages to NLP service (attempt {attempt+1})")
                     response = requests.post(
-                        NLP_SERVICE_URL, 
+                        NLP_SERVICE_URL,
                         json=json_elements,
                         timeout=10  # 10 seconds timeout
                     )
                     
                     if response.status_code == 200:
                         records = response.json()
-                        logger.info(f"Successfully processed {len(records)} messages from NLP service")
+                        print(f"Successfully processed {len(records)} messages from NLP service")
                         return [json.dumps(records)]
                     else:
-                        logger.warning(f"NLP service returned status code {response.status_code}. Response: {response.text}")
+                        print(f"NLP service returned status code {response.status_code}. Response: {response.text}")
                         if attempt < NLP_MAX_RETRIES - 1:
                             time.sleep(NLP_RETRY_DELAY * (2 ** attempt))  # Exponential backoff
-                
+                        
                 except requests.exceptions.RequestException as e:
-                    logger.error(f"Request to NLP service failed: {e}")
+                    print(f"Request to NLP service failed: {e}")
                     if attempt < NLP_MAX_RETRIES - 1:
                         time.sleep(NLP_RETRY_DELAY * (2 ** attempt))  # Exponential backoff
             
             # If we reach here, all retries failed
-            logger.error(f"All attempts to connect to NLP service failed after {NLP_MAX_RETRIES} retries, returning empty JSON array as string")
+            print(f"All attempts to connect to NLP service failed after {NLP_MAX_RETRIES} retries, returning empty JSON array as string")
             return ["[]"]  # Return empty JSON array as string
             
         except Exception as e:
-            logger.error(f"Failed to process window for NLP classification: {e}, returning empty JSON array as string")
+            print(f"Failed to process window for NLP classification: {e}, returning empty JSON array as string")
             return ["[]"]  # Return empty JSON array as string
 
 

@@ -155,7 +155,7 @@ services:
 
   social_flink_jobmanager:
     build:
-      context: ./msg_flink_job
+      context: ./social_flink_job
     depends_on:
       - setup_orchestrator
       - nlp_microservice
@@ -170,7 +170,7 @@ services:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - MINIO_ENDPOINT=minio:9000
-      - NLP_SERVICE_URL=http://nlp-service:8000/classify
+      - NLP_SERVICE_URL=http://nlp_microservice:8000/classify
     
 networks:
   dcrs_net:
