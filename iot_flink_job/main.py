@@ -24,14 +24,15 @@ Dependencies:
 
 
 # Utilities
-from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
-from pyflink.common import Time, Types
-from pyflink.datastream.connectors import FlinkKafkaConsumer
-from pyflink.datastream.window import TumblingEventTimeWindows
-from pyflink.common.serialization import SimpleStringSchema
+from data_templates import THRESHOLDS, SENT_NOTIFICATION_TO, ENVIRONMENTAL_CONTEXT, AT_RISK_ASSETS, RECOMMENDED_ACTIONS
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
-from pyflink.common.time import Duration
+from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
 from pyflink.datastream.functions import ProcessWindowFunction, MapFunction
+from pyflink.datastream.window import TumblingEventTimeWindows
+from pyflink.datastream.connectors import FlinkKafkaConsumer
+from pyflink.common.serialization import SimpleStringSchema
+from pyflink.common.time import Duration
+from pyflink.common import Time, Types
 
 from typing import List, Dict, Any, Optional, Tuple, Iterator, Union
 from kafka.admin import KafkaAdminClient
@@ -44,7 +45,6 @@ import math
 import time
 import json
 import uuid
-import sys
 import os
 
 
@@ -64,85 +64,6 @@ KAFKA_SERVERS = "kafka:9092"
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin")
-
-# Threshold values
-THRESHOLDS = {
-            "temperature_c": 35.0,
-            "humidity_percent": 80.0,
-            "co2_ppm": 600.0,
-            "pm25_ugm3": 12.0,
-            "smoke_index": 20.0,
-            "infrared_intensity": 0.2,
-            "battery_voltage": 3.7
-        }
-
-
-# Hardcoded notifications simulation, to improve with more dynamical stuff
-SENT_NOTIFICATION_TO = [
-      {
-        "agency": "local_fire_department",
-        "delivery_status": "confirmed"
-      },
-      {
-        "agency": "emergency_management",
-        "delivery_status": "confirmed"
-      }
-    ]
-
-RECOMMENDED_ACTIONS = [
-      {
-        "action": "deploy_fire_units",
-        "priority": "high",
-        "recommended_resources": ["engine_company", "brush_unit", "water_tender"]
-      },
-      {
-        "action": "evacuate_area",
-        "priority": "medium",
-        "radius_meters": 3000,
-        "evacuation_direction": "east"
-      }
-    ]
-
-AT_RISK_ASSETS = {
-      "population_centers": [
-        {
-          "name": "Highland Park",
-          "distance_meters": 2500,
-          "population": 12500,
-          "evacuation_priority": "high"
-        }
-      ],
-      "critical_infrastructure": [
-        {
-          "type": "power_substation",
-          "name": "Highland Substation",
-          "distance_meters": 1800,
-          "priority": "high"
-        },
-        {
-          "type": "water_reservoir",
-          "name": "Eagle Rock Reservoir",
-          "distance_meters": 3200,
-          "priority": "medium"
-        }
-      ]
-    }
-
-ENVIRONMENTAL_CONTEXT = {
-    "weather_conditions": {
-      "temperature": 35.2,
-      "humidity": 18.4,
-      "wind_speed": 25.1,
-      "wind_direction": 285.3,
-      "precipitation_chance": 0.02
-    },
-    "terrain_info": {
-      "vegetation_type": "chaparral",
-      "vegetation_density": "high",
-      "slope": "moderate",
-      "aspect": "west-facing"
-    }
-  }
 
 
 class JsonTimestampAssigner(TimestampAssigner):
@@ -335,7 +256,7 @@ class S3MinIOSinkGold(S3MinIOSinkBase):
     Persists analytics-ready data to the gold data layer in MinIO,
     separating normal readings from wildfire events.
     """
-
+    
     def map(self, value: str) -> str:
         """
         Save aggregated data to the gold layer in MinIO.
@@ -365,9 +286,6 @@ class S3MinIOSinkGold(S3MinIOSinkBase):
 
         except Exception as e:
             logger.error(f"Error while saving to gold layer: {str(e)}")
-
-        # Pass through for downstream processing
-        return value   
 
 
 class ThresholdFilterWindowFunction(ProcessWindowFunction):
@@ -1382,12 +1300,12 @@ def main():
     logger.info("Flink environment created")
     env.set_parallelism(1)
     env.set_stream_time_characteristic(TimeCharacteristic.EventTime)
-    env.enable_checkpointing(30000) # Check point every 30s
+    env.enable_checkpointing(30000)  # Check point every 30s
 
     # Kafka consumer configuration
     properties = {
         'bootstrap.servers': KAFKA_SERVERS,
-        'group.id': 'flink_consumer_group',
+        'group.id': 'iot_flink_consumer_group',  
         'request.timeout.ms': '60000',  # longer timeout
         'retry.backoff.ms': '5000',     # backoff between retries
         'reconnect.backoff.ms': '5000', # backoff for reconnections
@@ -1412,7 +1330,7 @@ def main():
     # Save each record to MinIO
     ds.map(S3MinIOSinkBronze(), output_type=Types.STRING())
 
-    # Apply windowing logic and print aggregated result
+    # Apply windowing logic and aggregate
     processed_stream = (
         ds.key_by(lambda x: json.loads(x).get("station_id", "UNKNOWN"), key_type=Types.STRING())
         .window(TumblingEventTimeWindows.of(Time.minutes(1)))
@@ -1420,8 +1338,10 @@ def main():
         .map(EnrichFromRedis(), output_type=Types.STRING())
     )
 
+    # Persist processed data to MinIO 
     processed_stream.map(S3MinIOSinkSilver(), output_type=Types.STRING())
 
+    # Apply windowing logic and calculate analytics
     gold_layer_stream = (
         processed_stream
         .key_by(lambda x: (json.loads(x)["station_metadata"]["position"].get("microarea_id", "UNKNOWN"),
@@ -1431,14 +1351,14 @@ def main():
         .process(GoldAggregatorWindowFunction(), output_type=Types.STRING())
     )
 
-    gold_layer_stream.map(S3MinIOSinkGold(), output_type=Types.STRING())
+    # Sink Analytics for the minute to MinIO 
+    gold_layer_stream.map(S3MinIOSinkGold())
 
     logger.info("Executing Flink job")
-    env.execute("Flink Job")
+    env.execute("IoT Measurements Processing Pipeline")
     logger.info("Flink job execution initiated")
 
 
 if __name__ == "__main__":
     main()
 
-# BIG PROBLEM WITH SEVERITY SCORE COMPUTATION

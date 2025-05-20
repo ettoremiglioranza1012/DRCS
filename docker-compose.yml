@@ -120,6 +120,21 @@ services:
     networks:
       - dcrs_net
 
+  nlp_microservice:
+    build:
+      context: ./nlp_microservice
+    container_name: nlp_microservice
+    ports:
+      - "8000:8000"
+    networks:
+      - dcrs_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   iot_flink_jobmanager:
     build:
       context: ./iot_flink_job
@@ -138,21 +153,25 @@ services:
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - MINIO_ENDPOINT=minio:9000
 
-  nlp_microservice:
+  social_flink_jobmanager:
     build:
-      context: ./nlp_microservice
-    container_name: nlp_microservice
-    ports:
-      - "8000:8000"
+      context: ./msg_flink_job
+    depends_on:
+      - setup_orchestrator
+      - nlp_microservice
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
     networks:
       - dcrs_net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+      - NLP_SERVICE_URL=http://nlp-service:8000/classify
+    
 networks:
   dcrs_net:
     driver: bridge

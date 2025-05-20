@@ -3,6 +3,7 @@
 from data_templates import SIGNAL_CATEGORIES, NOISE_CATEGORIES, TEMPLATES, SYNONYMS
 
 from sklearn.feature_extraction.text import TfidfVectorizer
+from fastapi.responses import JSONResponse
 from scipy.spatial.distance import cosine
 from fastapi import FastAPI, Request
 import numpy as np
@@ -150,16 +151,37 @@ async def health_check():
 
 @app.post("/classify")
 async def classify_message(request: Request):
+    results = []
     data = await request.json()
-    message = data.get("message", "")
-    labels = data.get("labels", ALL_LABELS)  # default to ALL_LABELS if none provided
+    for msg in data:
+        message = msg.get("text", "")
+        labels = msg.get("labels", ALL_LABELS)  # default to ALL_LABELS if none provided
 
-    if not message:
-        return {"error": "Provide a 'message' in the request body."}
+        if not message:
+            results.append({
+                "error": "Missing 'text' field",
+                "input": msg
+            })
+            continue
 
-    result = classifier.classify(message, candidate_labels=labels)
+        result = classifier.classify(message, candidate_labels=labels)
+        try:
+            nlp_msg = {
+                "message": result["sequence"], 
+                "category": result["labels"][0],
+                "unique_msg_id": msg["unique_msg_id"],
+                "macroarea_id": msg["macroarea_id"],
+                "microarea_id": msg["microarea_id"],
+                "latitude": msg["latitude"],
+                "longitude": msg["longitude"],
+                "timestamp": msg["timestamp"]
+            }
+        except Exception as e:
+            print(f"Failed to parse message metadata to nlp output, cause: {e}")
+        
+        results.append(nlp_msg)
 
-    return {"message": result["sequence"], "category": result["labels"][0]}
+    return JSONResponse(content=results)
 
 
 @app.post("/train")

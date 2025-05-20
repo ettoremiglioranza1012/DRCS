@@ -21,16 +21,13 @@ logger = logging.getLogger(__name__)
 def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
     """
     Creates a KafkaProducer configured for asynchronous message delivery
-    with standard durability settings (acks='1').
+    with standard durability settings (acks='all').
 
     Configuration Highlights:
     --------------------------
     - Asynchronous Delivery:
         Messages are sent in the background using callbacks.
         The program does not block or wait for acknowledgment.
-    - acks = '1':
-        Kafka acknowledges the message once the **leader broker** receives it.
-        This provides low latency but does not guarantee replication to followers.
     - JSON Serialization:
         Message payloads are serialized to UTF-8 encoded JSON strings.
 

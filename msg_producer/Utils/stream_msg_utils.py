@@ -130,15 +130,22 @@ def stream_micro_msg(macroarea_i: int, microarea_i: int):
         except Exception as e:
             logger.error(f"Failed to generate coordinates for macro {macroarea_i}, micro {microarea_i}: {e}")
             continue
+        
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        macroarea_id = f"A{macroarea_i}"
+        microarea_id = f"M{microarea_i}"
+        unique_msg_id = f"{macroarea_id}-{microarea_id}_{timestamp.replace('T', '_')}"
 
         message = {
+            "unique_msg_id": unique_msg_id,
+            "macroarea_id": macroarea_id,
+            "microarea_id": microarea_id,
             "text": text,
             "latitude": lat,
             "longitude": long,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": timestamp
         }
 
-        macroarea_id = f"A{macroarea_i}"
         key = macroarea_id.encode('utf8')
         topic = "social_msg"
 
