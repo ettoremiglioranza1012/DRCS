@@ -131,7 +131,7 @@ SYNONYMS = {
   "vicinity_zone": ["the area around us", "the outskirts", "the valley pass"],
   "current_state": ["non-functional", "destroyed", "out of service"],
 
-    "emotion_word": ["terrifying", "overwhelming", "unreal"],
+  "emotion_word": ["terrifying", "overwhelming", "unreal"],
   "time_frame": ["recent days", "this week", "today"],
   "feeling_state": ["anxious", "worried", "uneasy"],
   "direction": ["the north", "the hills", "down south"],

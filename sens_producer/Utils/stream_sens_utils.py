@@ -150,7 +150,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
             logger.info("Sending IoT sensor data to Kafka asynchronously...")
 
             try:
-                value = json.dumps(records)
+                # Create str area id
                 macroarea_id = f"A{macroarea_i}"
 
                 # Hashing Key to identify partition
@@ -161,9 +161,12 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                     value = json.dumps(record)
                     producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
                 logger.info("Message sent successfully.")
+            
+            except KafkaError as e:
+                logger.exception(f"[KAFKA ERROR] Failed to send message to Kafka after retries: {e}.")
+            
             except Exception as e:
-                logger.error(f"Failed to queue the message: {e}")
-                continue
+                logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
 
             # Ensure the message is actually sent before continuing to the next iteration
             try:
