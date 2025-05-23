@@ -3,6 +3,7 @@
 from Utils.geo_sens_utils import *
 from kafka.errors import KafkaError
 from kafka import KafkaProducer
+from datetime import datetime
 import logging
 import time
 import json
@@ -20,16 +21,13 @@ logger = logging.getLogger(__name__)
 def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
     """
     Creates a KafkaProducer configured for asynchronous message delivery
-    with standard durability settings (acks='1').
+    with standard durability settings (acks='all').
 
     Configuration Highlights:
     --------------------------
     - Asynchronous Delivery:
         Messages are sent in the background using callbacks.
         The program does not block or wait for acknowledgment.
-    - acks = '1':
-        Kafka acknowledges the message once the **leader broker** receives it.
-        This provides low latency but does not guarantee replication to followers.
     - JSON Serialization:
         Message payloads are serialized to UTF-8 encoded JSON strings.
 
@@ -131,8 +129,8 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                 continue
 
             # Generate fake measurements for i-th station in microarea
-            timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
-            list_of_mesdict = list()
+            timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            records = list()
             
             logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")
             for i in range(n_stats):
@@ -140,9 +138,9 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                 if not temp_mes:
                     logger.error(f"Measurements for 'S_A{macroarea_i}-M{microarea_i}_{i:03}' not consistent, check 'generate_measurements_json()' function.")
                     continue
-                list_of_mesdict.append(temp_mes)
+                records.append(temp_mes)
             
-            if not list_of_mesdict:
+            if not records:
                 logger.error("Message not consistent or too few stations, check data integrity.")
                 continue
             logger.info("All tests passed. Message data OK -> ready to send to Kafka.")
@@ -152,18 +150,23 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
             logger.info("Sending IoT sensor data to Kafka asynchronously...")
 
             try:
-                value = json.dumps(list_of_mesdict)
+                # Create str area id
                 macroarea_id = f"A{macroarea_i}"
 
                 # Hashing Key to identify partition
                 key = macroarea_id.encode('utf8')
 
                 # Asynchronous sending
-                producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                for record in records:
+                    value = json.dumps(record)
+                    producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
                 logger.info("Message sent successfully.")
+            
+            except KafkaError as e:
+                logger.exception(f"[KAFKA ERROR] Failed to send message to Kafka after retries: {e}.")
+            
             except Exception as e:
-                logger.error(f"Failed to queue the message: {e}")
-                continue
+                logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
 
             # Ensure the message is actually sent before continuing to the next iteration
             try:

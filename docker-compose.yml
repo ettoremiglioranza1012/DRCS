@@ -9,7 +9,20 @@ services:
       POSTGRES_DB: california_db
     ports:
       - "5433:5432"
-
+    networks:
+      - dcrs_net
+    
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    depends_on:
+      - postgres
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - dcrs_net
+    
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: zookeeper
@@ -18,6 +31,9 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    restart: always
+    networks:
+      - dcrs_net
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -34,6 +50,9 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+    restart: always
+    networks:
+      - dcrs_net
 
   minio:
     image: minio/minio:latest
@@ -46,6 +65,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     restart: unless-stopped
+    networks:
+      - dcrs_net
 
   setup_orchestrator:
     build:
@@ -56,13 +77,18 @@ services:
       - zookeeper
       - minio
     restart: "no"  # exit after success
+    networks:
+      - dcrs_net
 
   img_producer:
     build:
       context: ./img_producer
     depends_on:
       - setup_orchestrator
+      - create_buckets
     restart: always
+    networks:
+      - dcrs_net
 
   sens_producer:
     build:
@@ -70,20 +96,106 @@ services:
     depends_on:
       - setup_orchestrator
     restart: always
+    networks:
+      - dcrs_net
 
-  img_consumer:
+  msg_producer:
     build:
-      context: ./img_consumer
+      context: ./msg_producer
     depends_on:
-      - img_producer
-      - sens_producer
+      - setup_orchestrator
     restart: always
-  
-  sens_consumer:
+    networks:
+      - dcrs_net
+
+  create_buckets:
+    image: python:3.9
+    container_name: create_buckets
+    depends_on:
+      - minio
+    volumes:
+      - ./setup_minio:/scripts
+    working_dir: /scripts
+    command: ["sh", "-c", "pip install boto3 && python create_minio_buckets.py"]
+    restart: "no"
+    networks:
+      - dcrs_net
+
+  nlp_microservice:
     build:
-      context: ./sens_consumer
+      context: ./nlp_microservice
+    container_name: nlp_microservice
+    ports:
+      - "8000:8000"
+    networks:
+      - dcrs_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  iot_flink_jobmanager:
+    build:
+      context: ./iot_flink_job
+    container_name: iot_flink_jobmanager
     depends_on:
-      - img_producer
-      - sens_producer
-    restart: always
+      - create_buckets
+      - setup_orchestrator
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - dcrs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+
+  social_flink_jobmanager:
+    build:
+      context: ./social_flink_job
+    container_name: social_flink_jobmanager
+    depends_on:
+      - create_buckets
+      - setup_orchestrator
+      - nlp_microservice
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - dcrs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+      - NLP_SERVICE_URL=http://nlp_microservice:8000/classify
+    
+  satellite_flink_jobmanager:
+    build:
+      context: ./satellite_flink_job
+    container_name: satellite_flink_jobmanager
+    depends_on:
+      - create_buckets
+      - setup_orchestrator
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - dcrs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+    
+networks:
+  dcrs_net:
+    driver: bridge
 

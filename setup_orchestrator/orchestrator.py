@@ -7,8 +7,7 @@ def run_script(script_name):
     while True:
         try:
             print(f"[ORCHESTRATOR] Running {script_name}...")
-            subprocess.run(["python", script_name], check=True) 
-            # 'check=true' raise exception if scripts being run exits with a non-zero exit code (fail)
+            subprocess.run(["python", script_name], check=True)
             print(f"[ORCHESTRATOR] {script_name} completed successfully.")
             break
         except subprocess.CalledProcessError as e:
@@ -18,5 +17,4 @@ def run_script(script_name):
 if __name__ == "__main__":
     run_script("geo_grid_processor.py")
     run_script("kafka_cluster_config.py")
-
-
+    run_script("preload_redis.py") 

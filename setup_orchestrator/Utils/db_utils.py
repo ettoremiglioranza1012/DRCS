@@ -19,3 +19,4 @@ def connect_to_db() -> psycopg2.extensions.connection:
     )
 
     return conn
+

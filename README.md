@@ -53,6 +53,7 @@ The **DCS** performs the following:
 - Additionally, every producer is right now capable of producing data only for a specific micro area out of all the micro areas in the macro area. This current set up is done due to the fact that when prototyping, we wanted to keep the system as simple as possible to avoid overhead. With proper hardware and a proper setup, the system can be easily extended to produce data for all microareas in a macro area. To do this, there are two possible ways:
   - Create a new producer for each micro area in the macro area. This is the easiest way to do it, but it requires a lot of manual work.
    - Create a new producer for each macro area, and then use the existing producers to produce data for all micro areas in the macro area, maybe through subprocessing or threads. This is a more complex solution, but it allows for more flexibility and scalability in the future.
+- Currently, the timestamp of the event satellite image is handled during serialisation. However, this removes the delay of the fetching phase from the timestamp, making things simpler, but more inacurate. To make things more precise, the timestamp should be taken before the fetch and the watermark interval should be wider than the current 10s, I think. 
 
 ---
 
@@ -148,7 +149,7 @@ docker-compose down -v --remove-orphans
 
 --- 
 
-Developer Notes: Message Durability and Design Choices
+**Developer Notes: Message Durability and Design Choices**
 -------------------------------------------------------
 
 Our disaster recovery system requires reliable, time-synchronized delivery of large satellite images.
@@ -175,7 +176,7 @@ To guarantee that **no image is lost or silently dropped**, we adopt the followi
 - This significantly improves robustness under load or during broker transitions, without requiring manual retry logic.
 - Retried sends still respect `acks='all'` and ISR guarantees — meaning no compromise on consistency.
 
-Kafka Producer Configuration Notes 
+**Kafka Producer Configuration Notes** 
 ----------------------------------
 
 This code uses `acks='all'` to ensure strong delivery guarantees.
@@ -187,6 +188,7 @@ Current Development Setup:
 - min.insync.replicas = 1 (default)
 - acks = 'all' behaves like acks = '1' (only the leader exists)
 - Synchronous send (`future.get()`) ensures message delivery or raises exceptio
+
 Future Production Setup (Scalable):
 - Brokers: 3+
 - replication.factor = 3+
@@ -198,4 +200,90 @@ Note:
 Avoid overriding `min.insync.replicas` in development if using default broker configs.
 Just document the intent and apply topic-level configs at deployment time.
 
+**Flink consumer Configuration Notes**
+----------------------------------
+
+### Current Implementation
+
+* **Retry Logic**
+  Implemented robust retry strategies for connecting Flink to all dependent services (Redis, MinIO, Kafka, etc.) after container startup. Ensures full system readiness via a single `docker-compose up`, with no manual intervention required.
+
+* **Raw Data Ingestion – Bronze Layer**
+  Incoming raw sensor data is streamed and persisted to an S3-compatible MinIO data lake, under the `bronze` bucket. No transformation is applied at this stage.
+
+* **Windowed Processing in Flink**
+
+  * Tumbling window of **1 minute**.
+  * **Watermark** strategy: 5 seconds.
+  * Grouped by `station_id`.
+  * Uses **event timestamp** (not processing time), providing a more realistic and meaningful temporal basis despite the added complexity.
+
+* **Anomaly Filtering + Aggregation**
+
+  * Data is processed **in parallel per `station_id`** within each window.
+  * A set of hard-coded threshold-based rules filters the data.
+  * Only measurements exceeding thresholds are kept.
+  * For those, a **mean aggregation** is computed → results in **one JSON per minute per station with anomalies**.
+
+  #### Design Rationale
+
+  This approach is ideal for wildfire and environmental monitoring:
+
+  * 🔻 **Efficient Volume Reduction**: Detailed data from stations with normal readings is discarded, reducing payload size.
+  * 👁 **Maintained Situational Awareness**: All stations are tracked—whether they report anomalies or not.
+  * 📍 **Complete Metadata**: Both normal and anomaly records include metadata for spatial context.
+  * ⚠️ **Clear Status Indicators**: Differentiation between normal and anomaly records via `status`/`message` vs. `measurements`/`detection_flags`.
+  * 🕒 **Timestamp Preservation**: Timestamps are kept in both cases to ensure temporal continuity.
+
+  The current design strikes the right balance:
+
+  * Keeps “heartbeat” data for normal stations (they’re alive and reporting).
+  * Preserves full measurement detail only when anomalies are detected.
+  * Enables temporal and spatial analysis across all stations.
+
+* **Enrichment via Redis (In-Memory)**
+
+  * A Redis container is integrated into the system.
+  * Dimensional metadata is preloaded into Redis at startup.
+  * Flink queries Redis during stream processing for super-fast enrichment, with full retry logic ensuring reliability.
+
+---
+
+### Next Steps
+
+* [ ] **Silver Layer Output**
+  Save the enriched, per-minute anomaly summaries into the MinIO `silver` bucket for persistent storage and downstream usage.
+
+* [ ] **Gold Layer Aggregation**
+
+  * Aggregate all per-minute enriched records into a **single JSON per minute**.
+  * Compute a **severity score**, based on:
+
+    * The degree to which measurements exceed thresholds.
+    * The proportion of affected stations out of the total.
+  * (Optional) Add enrichment such as:
+
+    * Geographic bounding boxes for event area.
+    * Nearby facilities or infrastructure that may require evacuation.
+    * Vegetation type and density.
+  * (Optional) Enable automatic response logic (e.g. alerts to firefighters or civilians).
+
+* [ ] **Forecasting & Advanced Augmentation (Optional)**
+
+  * Integrate **weather forecast APIs** (Gino is already exploring this for early warning features).
+  * Use forecasted and real-time data in the **severity score computation**.
+  * (Very Optional) Add **unsupervised ML models** (e.g. anomaly detection, decision trees) to support detection of unusual event patterns and severity scoring.
+
+---
+
+Notes (To remove):
+
+Maybe necessary
+ettor@LAPTOP-GTACQJV3 MINGW64 /c/Projects/DisasterPipeline/Dockeraize_DCRS/flink_sql_job (ettore)
+$ chmod +x wait-for-it.sh
+
+Tot line of code= roughly 3500 lines of code
+
+Maven Central
+Docker Hub
 

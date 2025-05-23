@@ -1,8 +1,8 @@
 
 # Utilities
 from Utils.db_utils import connect_to_db
+import hashlib
 import random
-import time
 
 
 def get_number_of_stats(macroarea_i: int, microarea_i:int) -> int:
@@ -49,8 +49,8 @@ def generate_measurements_json(
 ) -> dict:
     """
     Generates a dict simulating environmental sensor data.
-    In 20% of the cases, simulates a wildfire detection with anomalous values.
-
+    For consistency, fire_event is deterministically assigned based on station ID.
+    
     Parameters:
         stations_i (int): Station index
         microarea_i (int): Microarea index
@@ -69,33 +69,33 @@ def generate_measurements_json(
             "battery_voltage": 3.7
         }
 
-        fire_event = random.random() < 0.2  # 20% chance to simulate fire
+        # Build station_id
+        station_id = f"S_A{macroarea_i}-M{microarea_i}_{stations_i:03}"
 
+        # Deterministic fire_event based on station hash
+        hash_digest = hashlib.md5(station_id.encode()).hexdigest()
+        # Example: "a1b2c3d4e5f6789012345678abcdef90"
+        # Uniform Distribution: MD5 hash distributes values uniformly across 0-99 range
+        hash_value = int(hash_digest[:8], 16)  # Use part of hash to avoid full int overflow
+        # Takes first 8 chars: "a1b2c3d4" → converts to integer
+        # Example: 2712847316 (decimal)
+        fire_event = (hash_value % 100) < 20  # 20% of stations deterministically simulate fire
+        # 2712847316 % 100 = 16
+        # If fire_probability = 20: 16 < 20 → True (fire)
+        # If fire_probability = 20: 85 < 20 → False (no fire)
+        # 20% chance of getting a value under 20
+        
         if fire_event:
-            # Simulate abnormal readings (e.g., above thresholds)
             measurements = {
                 "temperature_c": round(random.uniform(thresholds["temperature_c"] + 2, thresholds["temperature_c"] + 10), 2),
-                "humidity_percent": round(random.uniform(5.0, 20.0), 2),  # low humidity
+                "humidity_percent": round(random.uniform(5.0, 20.0), 2),
                 "co2_ppm": round(random.uniform(thresholds["co2_ppm"] + 50, thresholds["co2_ppm"] + 300), 2),
                 "pm25_ugm3": round(random.uniform(thresholds["pm25_ugm3"] + 5, thresholds["pm25_ugm3"] + 50), 2),
                 "smoke_index": round(random.uniform(thresholds["smoke_index"] + 5, thresholds["smoke_index"] + 20), 2),
                 "infrared_intensity": round(random.uniform(thresholds["infrared_intensity"] + 0.1, 1.0), 3),
                 "battery_voltage": round(random.uniform(3.4, thresholds["battery_voltage"]), 2)
             }
-
-            metadata = {
-                "wildfire_detected": True,
-                "smoke_detected": True,
-                "flame_detected_ir": True,
-                "severity_score": round(random.uniform(0.6, 1.0), 2),
-                "detection_confidence": round(random.uniform(0.75, 0.99), 2),
-                "air_quality_index": round(random.uniform(150, 300), 1),
-                "anomaly_detected": True,
-                "anomaly_type": "wildfire"
-            }
-
         else:
-            # Normal conditions
             safe_upper = {key: val * margin for key, val in thresholds.items()}
             measurements = {
                 "temperature_c": round(random.uniform(15.0, safe_upper["temperature_c"]), 2),
@@ -107,38 +107,13 @@ def generate_measurements_json(
                 "battery_voltage": round(random.uniform(3.4, safe_upper["battery_voltage"]), 2)
             }
 
-            metadata = {
-                "wildfire_detected": False,
-                "smoke_detected": False,
-                "flame_detected_ir": False,
-                "severity_score": 0.0,
-                "detection_confidence": 0.0,
-                "air_quality_index": None,
-                "anomaly_detected": False,
-                "anomaly_type": None
-            }
-
-        data = {
-            "station_id": f"S_A{macroarea_i}-M{microarea_i}_{stations_i:03}",
+        return {
+            "station_id": station_id,
             "timestamp": timestamp,
-
-            "measurements": measurements,
-
-            "metadata": {
-                "detection": metadata
-            },
-
-            "system_response": {
-                "event_triggered": "wildfire_alert" if fire_event else None,
-                "response_timestamp": None,
-                "action_taken": None,
-                "automated": True
-            }
+            "measurements": measurements
         }
-        
-        return data
-    
+
     except Exception as e:
-        raise SystemError(f"Failed to generate measuremetns for station 'S_M{macroarea_i}-m{microarea_i}_{stations_i:03}', error: {e}")
+        raise SystemError(f"Failed to generate measurements for station '{station_id}', error: {e}")
     
     

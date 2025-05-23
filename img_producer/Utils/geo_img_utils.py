@@ -1,13 +1,17 @@
 
 # Utilities
 from botocore.client import Config
+from datetime import datetime
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple
 from PIL import Image
 import numpy as np
 import logging
+import hashlib
 import random
 import boto3
+import math
+import uuid
 import time
 import json
 import io
@@ -31,6 +35,95 @@ s3 = boto3.client(
     config=Config(signature_version='s3v4'),
     region_name='us-east-1'
 )
+
+
+class PixelLocationManager():
+    def __init__(self):
+        self.locations = {}
+
+    def get_locations(
+            self, 
+            microarea_id: str,
+            macroarea_id: str,
+            min_long: float,
+            min_lat: float,
+            max_long: float,
+            max_lat: float
+    ) -> list[Tuple]:
+        """Generate or retrieve pixel locations for a specific region"""
+        location_id = f"{microarea_id}"
+        
+        if location_id not in self.locations.keys():
+            self.locations[location_id] = []
+            centroids_pixels = self._divide_microarea(
+                min_long,
+                min_lat,
+                max_long,
+                max_lat
+            )
+            
+            for value in centroids_pixels:
+                curr_label, curr_lat, curr_long = value
+                self.locations[location_id].append((curr_label, curr_lat, curr_long))
+        
+        return self.locations[location_id]
+
+    def _divide_microarea(
+            self,
+            min_long: float,
+            min_lat: float,
+            max_long: float,
+            max_lat: float,
+            max_area_km2: float = 20
+    ):
+        """
+            Comment Here!
+        """
+        # Compute mean latitude to adjust longitude distance
+        mean_lat = (min_lat + max_lat) / 2
+        km_per_deg_lat = 111  # approx constant
+        km_per_deg_long = 111 * math.cos(math.radians(mean_lat))
+
+        # Dimensions of the bounding box in kilometers
+        width_km = (max_long - min_long) * km_per_deg_long
+        height_km = (max_lat - min_lat) * km_per_deg_lat
+
+        total_area_km2 = width_km * height_km
+
+        # Estimated number of microareas
+        num_microareas = math.ceil(total_area_km2 / max_area_km2)
+
+        # Approximate number of columns and rows
+        n_cols = math.ceil(math.sqrt(num_microareas * (width_km / height_km)))
+        n_rows = math.ceil(num_microareas / n_cols)
+
+        long_step = (max_long - min_long) / n_cols
+        lat_step = (max_lat - min_lat) / n_rows
+
+        cells_centroids = []
+
+        for i in range(n_rows):
+            for j in range(n_cols):
+                cell_min_long = min_long + j * long_step
+                cell_max_long = cell_min_long + long_step
+                cell_min_lat = min_lat + i * lat_step
+                cell_max_lat = cell_min_lat + lat_step
+                
+                centroid_lat = (cell_min_lat + cell_max_lat) / 2
+                centroid_long = (cell_min_long + cell_max_long) / 2
+
+                if 2 < i < 5 and 2 < j < 5:
+                    label = "wildfire"
+                else:
+                    label = "vegetation"
+
+                cells_centroids.append((
+                    label,
+                    centroid_lat, 
+                    centroid_long
+                ))
+
+        return cells_centroids
 
 
 def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
@@ -74,23 +167,22 @@ def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
 
 def save_image_in_S3(image_bytes: bytes, timestamp: str, macroarea_id: str, microarea_id: str) -> str:
     """
-    Compress a NumPy image array and upload it to MinIO using boto3.
-
-    Args:
-        bucket_name (str): The name of the MinIO bucket.
-        object_key (str): The key (path) to store the image, e.g. 'region1/2025-05-09/image1.jpg'.
-        img (np.ndarray): Image array of shape (H, W, 3).
-        quality (int): JPEG compression quality (default 85).
+        To comment!
     """
     bucket_name = "satellite-imgs"
     image_file_id = f"sat_img_{macroarea_id}_{microarea_id}_{timestamp}"
-    object_key = f"{image_file_id}.jpg"
-
-    # Make sure the bucket exists
-    try:
-        s3.head_bucket(Bucket=bucket_name)
-    except s3.exceptions.ClientError:
-        s3.create_bucket(Bucket=bucket_name)
+    
+    # Extract date for partitioned path
+    year_month_day = timestamp.split("T")[0]  # YYYY-MM-DD
+    year = year_month_day.split("-")[0]
+    month = year_month_day.split("-")[1]
+    day = year_month_day.split("-")[2]
+    
+    # Unique uuid hex code
+    unique_id = uuid.uuid4().hex[:8]
+    
+    # Unique Img ID
+    object_key = f"sat_imgs/year={year}/month={month}/day={day}/{image_file_id}_{unique_id}.jpg"
     
     # Put object in bucket
     try:
@@ -102,31 +194,32 @@ def save_image_in_S3(image_bytes: bytes, timestamp: str, macroarea_id: str, micr
         )
         logger.info(f"Uploaded to bucket '{bucket_name}' at key '{object_key}'")
 
-        return image_file_id
+        return object_key
 
     except Exception as e:
         raise SystemError(f"[ERROR] Failed to store image with image_id={image_file_id}, Error: {e}")
 
 
-def generate_pixel_data(lat: float, lon: float, macroarea_id: str, fire_probability: float = 0.2) -> dict:
+def generate_pixel_data(label: str, lat: float, lon: float, microarea_id: str, fire_probability: int = 20) -> dict:
     """
-    Generate synthetic satellite data for a given pixel.
-    In fire_probability fraction of the cases, simulate fire conditions
-    by adjusting band values and classification.
-
-    Args:
-        lat (float): Latitude of the pixel.
-        lon (float): Longitude of the pixel.
-        tile_id (str): Sentinel-2 tile ID. Default is "T11SML".
-        fire_probability (float): Probability that the pixel simulates fire conditions.
-
-    Returns:
-        dict: A dictionary representing the pixel with coordinates, band values,
-              vegetation indices, and classification (either 'fire' or 'vegetation').
+        To comment!
     """
-    is_fire = random.random() < fire_probability
+    # pixel_id = f"{str(lat)}_{str(lon)}_{microarea_id}"
 
-    if is_fire:
+    # # Deterministic fire_event based on pixel location hash
+    # hash_digest = hashlib.md5(pixel_id.encode()).hexdigest()
+    # # Example: "a1b2c3d4e5f6789012345678abcdef90"
+    # # Uniform Distribution: MD5 hash distributes values uniformly across 0-99 range
+    # hash_value = int(hash_digest[:8], 16) # Use part of hash to avoid full int overflow
+    # # Takes first 8 chars: "a1b2c3d4" → converts to integer
+    # # Example: 2712847316 (decimal)
+    # is_fire = (hash_value % 100) < fire_probability # 20% of pixels deterministically simulate fire
+    # # 2712847316 % 100 = 16
+    # # If fire_probability = 20: 16 < 20 → True (fire)
+    # # If fire_probability = 20: 85 < 20 → False (no fire)
+    # # 20% chance of getting a value under 20
+
+    if label == "wildfire":
         # Simulated fire conditions
         B4 = random.uniform(0.3, 0.4)
         B8 = random.uniform(0.1, 0.2)
@@ -141,15 +234,11 @@ def generate_pixel_data(lat: float, lon: float, macroarea_id: str, fire_probabil
         B11 = random.uniform(0.05, 0.2)
         B12 = random.uniform(0.05, 0.2)
 
-    NDVI = round((B8 - B4) / (B8 + B4), 3)
-    NDMI = round((B8 - B11) / (B8 + B11), 3)
-    NDWI = round((B3 - B8) / (B3 + B8), 3)
-    NBR = round((B8 - B12) / (B8 + B12), 3)
 
     pixel_json = {
         "latitude": round(lat, 6),
         "longitude": round(lon, 6),
-        "tile_id": macroarea_id,
+        "microarea_id": microarea_id,
         "bands": {
             "B2": round(random.uniform(0.05, 0.2), 3),
             "B3": round(B3, 3),
@@ -158,74 +247,45 @@ def generate_pixel_data(lat: float, lon: float, macroarea_id: str, fire_probabil
             "B8A": round(random.uniform(0.05, 0.3), 3),
             "B11": round(B11, 3),
             "B12": round(B12, 3)
-        },
-        "indices": {
-            "NDVI": NDVI,
-            "NDMI": NDMI,
-            "NDWI": NDWI,
-            "NBR": NBR
-        },
-        "classification": {
-            "scene_class": "fire" if is_fire else "vegetation"
         }
     }
 
     return pixel_json
 
 
-def firedet_bands_metadata(bbox_list: list, macroarea_id: str, n: int = 50, fire_probability: float = 0.2) -> dict:
+def firedet_bands_metadata(bbox_list: list, microarea_id: str, macroarea_id: str, fire_probability: int = 20) -> dict:
     """
-    Generate synthetic satellite pixel data for a geographic area.
-    Randomly samples n pixels within the bounding box and computes whether
-    any pixel is classified as 'fire' based on fire_probability.
-
-    Args:
-        bbox_list (list): Bounding box defined as [min_long, min_lat, max_long, max_lat].
-        n (int): Number of pixels to generate. Default is 50.
-        fire_probability (float): Probability that a pixel simulates fire conditions.
-
-    Returns:
-        dict: {
-            'fire_detected': bool,
-            'satellite_data': list of valid pixel dictionaries
-        }
-
-    Raises:
-        ValueError: If bbox_list is invalid or n <= 0
+        To comment!
     """
     # Validate bounding box
     if not isinstance(bbox_list, (list, tuple)) or len(bbox_list) != 4:
         raise ValueError("[ERROR] bbox_list must be a list of 4 coordinates [min_long, min_lat, max_long, max_lat]")
-
-    try:
-        n = int(n)
-    except Exception:
-        raise ValueError(f"[ERROR] Invalid value for n: {n}. Must be an integer.")
-
-    if n <= 0:
-        raise ValueError("[ERROR] n must be a positive integer")
+    
+    location_manager = PixelLocationManager()
 
     min_long, min_lat, max_long, max_lat = bbox_list
     sampled_pixels = []
-    fire_detected = False
 
-    for i in range(n):
+    location = location_manager.get_locations(
+        microarea_id, 
+        macroarea_id,
+        min_long, 
+        min_lat, 
+        max_long,
+        max_lat
+    )
+
+    for i in range(len(location)):
         try:
-            lon = random.uniform(min_long, max_long)
-            lat = random.uniform(min_lat, max_lat)
-            pixel_data = generate_pixel_data(lat, lon, macroarea_id=macroarea_id, fire_probability=fire_probability)
-
-            if pixel_data["classification"]["scene_class"] == "fire":
-                fire_detected = True
-
+            label, lat, lon = location[i]
+            pixel_data = generate_pixel_data(label, lat, lon, microarea_id=microarea_id, fire_probability=fire_probability)
             sampled_pixels.append(pixel_data)
 
         except Exception as e:
-            print(f"[WARNING] Failed to generate pixel {i+1}/{n}: {e}")
+            print(f"[WARNING] Failed to generate pixel {i+1}/{len(location)}: {e}")
             continue
 
     metadata = {
-        "fire_detected": fire_detected,
         "satellite_data": sampled_pixels
     }
 
@@ -251,8 +311,10 @@ def serialize_image_payload(image_bytes: bytes, metadata: Dict, macroarea_id:str
         raise ValueError("[ERROR] metadata must be a dictionary")
 
     # Get timestamp (ISO 8601 format)
-    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
     metadata['timestamp'] = timestamp
+    metadata["microarea_id"] = microarea_id
+    metadata["macroarea_id"] = macroarea_id
 
     logger.info(f"Saving image of size {len(image_bytes)} bytes to database...")
 
@@ -304,5 +366,4 @@ def plot_image(image: np.ndarray, factor: float = 3.5/255, clip_range: Tuple[flo
     plt.axis('off')
 
     plt.show()
-
 

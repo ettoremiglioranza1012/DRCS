@@ -142,3 +142,4 @@ def filter_image(img: np.ndarray) -> np.ndarray:
     logger.info("Total filter time: %.2f s", time.perf_counter() - t_start)
 
     return img_fire_hwc
+
