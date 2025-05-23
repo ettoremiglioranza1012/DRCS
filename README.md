@@ -284,3 +284,6 @@ $ chmod +x wait-for-it.sh
 
 Tot line of code= roughly 3500 lines of code
 
+Maven Central
+Docker Hub
+

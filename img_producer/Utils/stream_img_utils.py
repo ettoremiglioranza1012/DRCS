@@ -4,6 +4,7 @@ from kafka.errors import KafkaError
 from sentinelhub import SHConfig
 from kafka import KafkaProducer
 import logging
+import json
 import time
 
 from Utils.imgfetch_utils import (
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
     """
-    Initializes and returns a KafkaProducer with strong delivery guarantees.
+    Initializes and returns a KafkaProducer.
 
     Configuration:
     - `acks='all'`: Waits for acknowledgment from all in-sync replicas before confirming success.
@@ -48,33 +49,29 @@ def create_producer(bootstrap_servers: list[str]) -> KafkaProducer:
     return producer
 
 
-def send_message_to_kafka(message_payload: str, topic: str, producer: KafkaProducer, macroarea_id: str) -> None:
+def on_send_success(record_metadata):
     """
-    Sends a message to the given Kafka topic and waits for confirmation.
-
-    Assumes:
-    - message_payload is a JSON string.
-    - The KafkaProducer is configured with a value_serializer that encodes the string to bytes.
-    - acks='all' and retries are already set on the producer.
-    - Hash microarea_id retrived from database to identify partition. 
-
-    Includes:
-    - Synchronous blocking send with .get(timeout=15)
-    - Logs success or failure with partition and offset info
+    Callback for successful Kafka message delivery.
+    
+    Parameters:
+    -----------
+    record_metadata : kafka.producer.record_metadata.RecordMetadata
+        Metadata containing topic name, partition, and offset of the delivered message.
     """
-    try:
-        key = macroarea_id.encode('utf8')
-        future = producer.send(topic, key=key, value=message_payload)
-        record_metadata = future.get(timeout=15) # timeout in s;
-        logger.info(f"[KAFKA] Message sent to topic '{record_metadata.topic}', "
-                    f"partition {record_metadata.partition}, offset {record_metadata.offset}")
-    
-    except KafkaError as e:
-        logger.exception("[KAFKA ERROR] Failed to send message to Kafka after retries.")
-        # fallback mechanism?
-    
-    except Exception as e:
-        logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
+    logger.info(f"[KAFKA ASYNC] Message sent to topic '{record_metadata.topic}', "
+                f"partition {record_metadata.partition}, offset {record_metadata.offset}")
+
+
+def on_send_error(excp: KafkaError):
+    """
+    Callback for failed Kafka message delivery.
+
+    Parameters:
+    -----------
+    excp : KafkaError
+        The exception that occurred during message send.
+    """
+    logger.error(f"[KAFKA ERROR] Failed to send message: {excp}")
 
 
 def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
@@ -106,13 +103,6 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
         The numeric ID of the macroarea (e.g., 1 to 5) used to build topic names and fetch spatial data.
     microarea_i : int
         The numeric ID of the microarea (e.g., 1 to 80) used to fetch specific spatial data.
-        
-    Notes:
-    ------
-    - Kafka delivery is synchronous and blocking (via `future.get()`), ensuring guaranteed write acknowledgment.
-    - The topic is expected to be named like 'satellite_imgs_A{macroarea_i}' and pre-created with partitions.
-    - The loop will wait for the remainder of a X-seconds interval to maintain consistent image intervals.
-    - This function is designed to run indefinitely unless an error or empty image response occurs.
     """
     print("\n[IMG-PRODUCER-STREAM-PROCESS]\n")
 
@@ -191,7 +181,31 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
             topic = f"satellite_img"
             logger.info("Sending payload to Kafka...")
             t_send = time.perf_counter()
-            send_message_to_kafka(img_payload_str, topic, producer, macroarea_id)
+
+            try:
+                # Assign to value for clarity
+                value = img_payload_str
+                
+                # Hashing Key to identify partition
+                key = macroarea_id.encode('utf8')
+                
+                # Asynchronous sending
+                producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                logger.info("Message sent successfully.")
+            
+            except KafkaError as e:
+                logger.exception(f"[KAFKA ERROR] Failed to send message to Kafka after retries: {e}.")
+            
+            except Exception as e:
+                logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
+            
+            # Ensure the message is actually sent before continuing to the next iteration
+            try:
+                producer.flush()
+                logger.info("Message flushed.\n")
+            except Exception as e:
+                logger.error(f"Failed to flush the message: {e}")
+                continue
             logger.info("Sending procedure closed in %.2f s\n", time.perf_counter() - t_send)
 
             iteration_time = time.perf_counter() - t_macro_start

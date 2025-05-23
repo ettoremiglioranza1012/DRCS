@@ -74,9 +74,17 @@ def generate_measurements_json(
 
         # Deterministic fire_event based on station hash
         hash_digest = hashlib.md5(station_id.encode()).hexdigest()
+        # Example: "a1b2c3d4e5f6789012345678abcdef90"
+        # Uniform Distribution: MD5 hash distributes values uniformly across 0-99 range
         hash_value = int(hash_digest[:8], 16)  # Use part of hash to avoid full int overflow
+        # Takes first 8 chars: "a1b2c3d4" → converts to integer
+        # Example: 2712847316 (decimal)
         fire_event = (hash_value % 100) < 20  # 20% of stations deterministically simulate fire
-
+        # 2712847316 % 100 = 16
+        # If fire_probability = 20: 16 < 20 → True (fire)
+        # If fire_probability = 20: 85 < 20 → False (no fire)
+        # 20% chance of getting a value under 20
+        
         if fire_event:
             measurements = {
                 "temperature_c": round(random.uniform(thresholds["temperature_c"] + 2, thresholds["temperature_c"] + 10), 2),

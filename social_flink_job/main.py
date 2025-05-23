@@ -1,4 +1,9 @@
 
+"""
+    Comment here!
+"""
+
+
 # Utilities
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
 from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
@@ -483,12 +488,12 @@ def wait_for_minio_ready(
                 aws_secret_access_key=secret_key
             )
             s3.list_buckets()  # just ping
-            logger.info("[INFO] MinIO is ready")
+            logger.info("MinIO is ready")
             return
         except Exception as e:
-            logger.warning(f"[WARN] MinIO not ready (attempt {i+1}/{max_retries}): {e}")
+            logger.warning(f"MinIO not ready (attempt {i+1}/{max_retries}): {e}")
             time.sleep(retry_interval)
-    raise Exception("[ERROR] MinIO is not ready after retries")
+    raise Exception("MinIO is not ready after retries")
 
 
 def wait_for_kafka_ready(

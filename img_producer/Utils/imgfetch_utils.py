@@ -199,7 +199,7 @@ def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bb
 
     try:
         # 3. Generate synthetic metadata (with fire detection)
-        metadata = firedet_bands_metadata(bbox, macroarea_id)
+        metadata = firedet_bands_metadata(bbox, microarea_id, macroarea_id)
     except Exception as e:
         logger.error(f"[ERROR] Failed to generate metadata: {e}")
         return None

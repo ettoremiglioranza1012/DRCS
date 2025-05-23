@@ -100,6 +100,40 @@ try:
 
     print("[INFO] Redis populated successfully with station metadata.")
 
+    print("[INFO] Fetching microareas info from PostgreSQL...")
+
+    cur.execute("""
+        SELECT
+            microarea_id,
+            min_long, 
+            min_lat, 
+            max_long,
+            max_lat
+        FROM microareas
+    """)
+
+    rows = cur.fetchall()
+    print(f"[INFO] Retrieved {len(rows)} rows from 'microareas' table.")
+
+    for row in rows:
+        microarea_id, \
+        min_long, \
+        min_lat, \
+        max_long, \
+        max_lat = row
+    
+        key = f"microarea:{microarea_id}"
+        value = json.dumps({
+            "min_long": min_long, 
+            "min_lat": min_lat, 
+            "max_long": max_long,
+            "max_lat": max_lat
+        })
+
+        r.set(key, value)
+    
+    print("[INFO] Redis populated successfully with microareas info.")
+
 except Exception as e:
     print(f"[ERROR] Failed to fetch or write metadata: {e}")
 

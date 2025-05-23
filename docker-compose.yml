@@ -85,6 +85,7 @@ services:
       context: ./img_producer
     depends_on:
       - setup_orchestrator
+      - create_buckets
     restart: always
     networks:
       - dcrs_net
@@ -140,6 +141,7 @@ services:
       context: ./iot_flink_job
     container_name: iot_flink_jobmanager
     depends_on:
+      - create_buckets
       - setup_orchestrator
       - kafka
       - zookeeper
@@ -156,7 +158,9 @@ services:
   social_flink_jobmanager:
     build:
       context: ./social_flink_job
+    container_name: social_flink_jobmanager
     depends_on:
+      - create_buckets
       - setup_orchestrator
       - nlp_microservice
       - kafka
@@ -171,6 +175,25 @@ services:
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - MINIO_ENDPOINT=minio:9000
       - NLP_SERVICE_URL=http://nlp_microservice:8000/classify
+    
+  satellite_flink_jobmanager:
+    build:
+      context: ./satellite_flink_job
+    container_name: satellite_flink_jobmanager
+    depends_on:
+      - create_buckets
+      - setup_orchestrator
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - dcrs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
     
 networks:
   dcrs_net:

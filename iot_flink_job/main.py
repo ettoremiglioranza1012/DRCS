@@ -228,7 +228,7 @@ class S3MinIOSinkSilver(S3MinIOSinkBase):
         try:
             data = json.loads(value)
             station_id = data["station_id"]
-            timestamp_epoch_millis = data["response_timestamp"]
+            timestamp_epoch_millis = data["latest_event_timestamp"]
             # Convert epoch milliseconds to datetime
             timestamp = datetime.fromtimestamp(timestamp_epoch_millis / 1000.0).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] 
             
@@ -270,7 +270,7 @@ class S3MinIOSinkGold(S3MinIOSinkBase):
         try:
             data = json.loads(value)
             region_id = data["region_id"]
-            timestamp_epoch_millis = data["response_timestamp"]
+            timestamp_epoch_millis = data["latest_event_timestamp"]
             # Convert epoch milliseconds to datetime
             timestamp = datetime.fromtimestamp(timestamp_epoch_millis / 1000.0).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
             
@@ -327,6 +327,7 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
         """
         filtered_results = []
         raw_json_objects = []
+        event_timestamp = None
 
         try:
             # Step 1: filter by threshold
@@ -334,6 +335,12 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
                 try:
                     data = json.loads(element)
                     raw_json_objects.append(data)  # Save parsed data for reuse
+
+                    # Extract timestamp using the appropriate field
+                    dt_curr_timestamp = datetime.strptime(data.get("timestamp"), "%Y-%m-%dT%H:%M:%S.%f")
+                    curr_timestamp = int(dt_curr_timestamp.timestamp() * 1000)
+                    if event_timestamp is None or curr_timestamp > event_timestamp:
+                        event_timestamp = curr_timestamp
 
                     exceeded_thresholds = {}
                     for field, threshold_value in self.thresholds.items():
@@ -369,6 +376,7 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
                 mean_measurements = {
                     'station_id': filtered_results[0]['station_id'],
                     'response_timestamp': response_timestamp,
+                    "latest_event_timestamp": event_timestamp,
                     'measurements': mean_measurements_data
                 }
 
@@ -396,7 +404,8 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
                 "status": "OK",
                 "message": "No anomalies detected",
                 "station_id": station_id,
-                "response_timestamp": context.window().end  # Use window end time
+                "response_timestamp": context.window().end,  # Use window end time
+                "latest_event_timestamp": event_timestamp
             }
             # Return a list of field values that match Flink's expected Row structure
             status_json = json.dumps(status_message)
@@ -409,7 +418,8 @@ class ThresholdFilterWindowFunction(ProcessWindowFunction):
                 "status": "ERROR",
                 "message": f"Error processing window: {str(e)}",
                 "station_id": key,
-                "response_timestamp": context.window().end
+                "response_timestamp": context.window().end,
+                "latest_event_timestamp": event_timestamp
             }
             return [json.dumps(error_message)]
 
@@ -638,6 +648,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
             # Initialize tracking variables
             microarea_id = None
             response_timestamp = None
+            agg_event_timestamp = None
             anomalous_stations_count = 0
             total_stations_count = 0  # Will count actual valid elements
 
@@ -671,14 +682,28 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
                     if response_timestamp is None or curr_timestamp > response_timestamp:
                         response_timestamp = curr_timestamp
 
+                    event_curr_timestamp = data.get("latest_event_timestamp")
+                    event_curr_timestamp = data.get("latest_event_timestamp")
+
+                    if event_curr_timestamp is not None:
+                        if agg_event_timestamp is None or event_curr_timestamp > agg_event_timestamp:
+                            agg_event_timestamp = event_curr_timestamp
+                    else:
+                        logger.warning(f"Missing latest_event_timestamp, falling back to response_timestamp for station: {data.get('station_id', 'unknown')}")
+                        event_curr_timestamp = data.get("response_timestamp")
+
                     # Add to station list
                     gold_data_stations.append(data)
 
                     # Check if this station detected an anomaly
                     has_anomaly = False
-                    if "detection_flags" in data and data["detection_flags"].get("anomaly_detected", False):
+                    if "detection_flags" in data:
                         anomalous_stations_count += 1
-                        has_anomaly = True
+                        flags = data["detection_flags"]
+                        has_anomaly = (flags.get("anomaly_detected", False) or 
+                                    flags.get("wildfire_detected", False) or 
+                                    flags.get("smoke_detected", False) or 
+                                    flags.get("flame_detected_ir", False))
                         logger.debug(f"Anomaly detected in station data: {data.get('station_id', 'unknown')}")
 
                     # Process measurements
@@ -697,12 +722,12 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
         
             # Return a simplified record in case of no anomalies
             if anomalous_stations_count == 0 or total_stations_count == 0:
-                return self._create_normal_event(microarea_id, response_timestamp, gold_data_stations)
+                return self._create_normal_event(microarea_id, response_timestamp, agg_event_timestamp, gold_data_stations)
             
             # Calculate metrics and create gold data for wildfire events
             return self._create_wildfire_event(
-                microarea_id, response_timestamp, gold_data_stations,
-                anomalous_stations_count, total_stations_count,
+                microarea_id, response_timestamp, agg_event_timestamp,
+                gold_data_stations, anomalous_stations_count, total_stations_count,
                 anomalous_measurements_accumulator, anomalous_fields_counts,
                 max_critical_meas, context
             )
@@ -765,8 +790,10 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
                 if curr_field not in max_critical_meas or curr_value > max_critical_meas[curr_field]:
                     max_critical_meas[curr_field] = curr_value
     
-    def _create_normal_event(self, microarea_id: Optional[str], response_timestamp: Optional[int], 
-                            gold_data_stations: List[Dict[str, Any]]) -> List[str]:
+    def _create_normal_event(self, microarea_id: Optional[str], 
+                             response_timestamp: Optional[int], 
+                             agg_event_timestamp: Optional[int], 
+                             gold_data_stations: List[Dict[str, Any]]) -> List[str]:
         """
         Create a normal (non-anomalous) event record when no anomalies are detected.
         
@@ -791,6 +818,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
             "event_id": f"{microarea_id}_{response_timestamp}_{unique_id}",
             "region_id": microarea_id,
             "response_timestamp": response_timestamp,
+            "latest_event_timestamp": agg_event_timestamp,
             "event_type": "normal",
             "detection_source": "sensor_network",
             "aggregated_detection": {
@@ -807,7 +835,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
         return [json.dumps(gold_data)]
     
     def _create_wildfire_event(self, microarea_id: Optional[str], response_timestamp: Optional[int],
-                              gold_data_stations: List[Dict[str, Any]],
+                              agg_event_timestamp: Optional[int], gold_data_stations: List[Dict[str, Any]],
                               anomalous_stations_count: int, total_stations_count: int,
                               anomalous_measurements_accumulator: Dict[str, float],
                               anomalous_fields_counts: Dict[str, int],
@@ -882,6 +910,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
             "event_id": f"{microarea_id}_{response_timestamp}_{unique_id}",
             "region_id": microarea_id,
             "response_timestamp": response_timestamp,
+            "latest_event_timestamp": agg_event_timestamp,
             "event_type": "wildfire",
             "detection_source": "sensor_network",
             "aggregated_detection": {
@@ -1245,12 +1274,12 @@ def wait_for_minio_ready(
                 aws_secret_access_key=secret_key
             )
             s3.list_buckets()  # just ping
-            logger.info("[INFO] MinIO is ready")
+            logger.info("MinIO is ready")
             return
         except Exception as e:
-            logger.warning(f"[WARN] MinIO not ready (attempt {i+1}/{max_retries}): {e}")
+            logger.warning(f"MinIO not ready (attempt {i+1}/{max_retries}): {e}")
             time.sleep(retry_interval)
-    raise Exception("[ERROR] MinIO is not ready after retries")
+    raise Exception("MinIO is not ready after retries")
 
 
 def wait_for_kafka_ready(
