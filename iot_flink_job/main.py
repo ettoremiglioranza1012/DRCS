@@ -1385,7 +1385,6 @@ def main():
 
     logger.info("Executing Flink job")
     env.execute("IoT Measurements Processing Pipeline")
-    logger.info("Flink job execution initiated")
 
 
 if __name__ == "__main__":

@@ -5,22 +5,28 @@
 
 
 # Utiliies 
-from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
 from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
-from pyflink.datastream.functions import ProcessWindowFunction, MapFunction
-from pyflink.datastream.window import TumblingEventTimeWindows
 from pyflink.datastream.connectors import FlinkKafkaConsumer
 from pyflink.common.serialization import SimpleStringSchema
-from pyflink.common.time import Duration
-from pyflink.common import Time, Types
+from pyflink.datastream.functions import MapFunction
+from pyflink.common import Types
 
-from typing import List, Dict, Any, Optional, Tuple, Iterator, Union
-from data_templates import INDICES_THRESHOLDS, BANDS_THRESHOLDS
+from data_templates import (
+    INDICES_THRESHOLDS, 
+    BANDS_THRESHOLDS, 
+    FIRE_DETECTION_THRESHOLDS, 
+    FIRE_BAND_THRESHOLDS, 
+    PIXEL_AREA_KM2
+)
+
+from typing import List, Dict, Any, Tuple, Union
 from kafka.admin import KafkaAdminClient
+from datetime import datetime
 import logging
 import random
 import redis
 import boto3
+import math
 import time
 import json
 import uuid
@@ -161,8 +167,7 @@ class S3MinIOSinkSilver(S3MinIOSinkBase):
     """
     MinIO sink for processed (silver) data layer.
     
-    Persists processed sensor data to the silver data layer in MinIO,
-    separating normal readings from anomalies.
+    Persists processed sensor data to the silver data layer in MinIO.
     """
 
     def map(self, value: str) -> str:
@@ -181,6 +186,37 @@ class S3MinIOSinkSilver(S3MinIOSinkBase):
             event_timestamp = metadata.get("timestamp")
             region_id = metadata.get("microarea_id")
             self.save_record_to_minio(value, region_id, event_timestamp, bucket_name='silver', partition='satellite_processed')
+
+        except Exception as e:
+            logger.error(f"Error while saving to silver layer: {str(e)}")
+
+        # Pass through for downstream processing
+        return value
+
+
+class S3MinIOSinkGold(S3MinIOSinkBase):
+    """
+    MinIO sink for processed (gold) data layer.
+    
+    Persists processed sensor data to the gold data layer in MinIO,
+    separating normal readings from anomalies.
+    """
+
+    def map(self, value: str) -> str:
+        """
+        Save processed sensor data to the gold layer in MinIO.
+        
+        Args:
+            value: JSON string containing processed sensor data
+            
+        Returns:
+            str: Original value (passed through for downstream processing)
+        """
+        try:
+            data = json.loads(value)
+            event_timestamp = data.get("event_timestamp")
+            region_id = data.get("microarea_id")
+            self.save_record_to_minio(value, region_id, event_timestamp, bucket_name='gold', partition='satellite_gold')
 
         except Exception as e:
             logger.error(f"Error while saving to silver layer: {str(e)}")
@@ -468,6 +504,666 @@ class EnrichFromRedis(MapFunction):
             logger.error(f"Error in Redis enrichment: {str(e)}")
             # Return original value to ensure pipeline continues
             return value            
+        
+
+class SatelliteWildfireDetector(MapFunction):
+    """
+    Enriches satellite imagery data with wildfire detection metrics and severity scoring.
+    Processes multispectral satellite data to detect fire anomalies and calculate
+    comprehensive risk assessments based on spectral indices and environmental factors.
+    """
+
+    def __init__(self, fire_detection_thresholds: dict, fire_bands_thresholds: dict, pixel_area_km2: int): 
+        self.fire_detection_thresholds = fire_detection_thresholds
+        self.fire_bands_thresholds = fire_bands_thresholds
+        self.pixel_area_km2 = pixel_area_km2
+
+    def map(self, value: str) -> str:
+        """
+        Process satellite data to detect wildfire anomalies and calculate severity metrics.
+        
+        Args:
+            value: JSON string containing satellite imagery data
+            
+        Returns:
+            Enriched JSON string with wildfire detection metrics
+        """
+        try:
+            data = json.loads(value)
+            enriched_data = self._process_satellite_data(data)
+            return json.dumps(enriched_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to process satellite data in wildfire detector: {e}")
+            return value
+    
+    def _process_satellite_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Main processing function that enriches satellite data with fire detection metrics.
+        """
+        metadata = data.get("metadata", {})
+        satellite_data = metadata.get("satellite_data", [])
+        
+        if not satellite_data:
+            return data
+        
+        # Extract fire detection metrics
+        fire_metrics = self._analyze_fire_pixels(satellite_data)
+        
+        # Create enriched response
+        enriched_data = {}
+        
+        # Check if any anomalies were detected
+        if fire_metrics["anomalous_count"] == 0:
+            enriched_data["image_pointer"] = data.get("image_pointer")
+            enriched_data["event_timestamp"] = metadata.get("timestamp")
+            enriched_data["response_timestamp"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            enriched_data["microarea_id"] = metadata.get("microarea_id")
+            enriched_data["macroarea_id"] = metadata.get("macroarea_id")
+            enriched_data["microarea_info"] = metadata.get("microarea_info")
+            enriched_data["wildfire_analysis"] = self._create_normal_event(satellite_data, fire_metrics)
+            enriched_data["pixels"] = metadata.get("satellite_data")
+        else:
+
+            # Calculate additional environmental indicators
+            environmental_metrics = self._calculate_environmental_metrics(satellite_data, fire_metrics)
+        
+            # Calculate severity score
+            severity_score, risk_level = self._calculate_wildfire_severity(fire_metrics, satellite_data, environmental_metrics)
+
+            # Enriched anomalies data payload
+            enriched_data["image_pointer"] = data.get("image_pointer")
+            enriched_data["event_timestamp"] = metadata.get("timestamp")
+            enriched_data["response_timestamp"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            enriched_data["microarea_id"] = metadata.get("microarea_id")
+            enriched_data["macroarea_id"] = metadata.get("macroarea_id")
+            enriched_data["microarea_info"] = metadata.get("microarea_info")
+            enriched_data["wildfire_analysis"] = {
+                "detection_summary": {
+                    "total_pixels": len(satellite_data),
+                    "anomalous_pixels": fire_metrics["anomalous_count"],
+                    "anomaly_percentage": fire_metrics["anomaly_percentage"],
+                    "affected_area_km2": fire_metrics["affected_area_km2"],
+                    "confidence_level": fire_metrics["avg_confidence"]
+                },
+                "fire_indicators": fire_metrics["fire_indicators"],
+                "spectral_analysis": fire_metrics["spectral_metrics"],
+                "environmental_assessment": environmental_metrics,
+                "severity_assessment": {
+                    "severity_score": severity_score,
+                    "risk_level": risk_level,
+                    "threat_classification": self._classify_threat_level(severity_score)
+                },
+                "spatial_distribution": fire_metrics["spatial_metrics"],
+                "recommendations": self._generate_recommendations(severity_score, fire_metrics)
+            }
+            enriched_data["pixels"] = metadata.get("satellite_data")
+        
+        return enriched_data
+    
+    def _analyze_fire_pixels(self, pixels: List[Dict]) -> Dict[str, Any]:
+        """
+        Analyze satellite pixels to identify fire anomalies and extract key metrics.
+        """
+        anomalous_pixels = []
+        fire_indicators = {
+            "high_temperature_signatures": 0,
+            "vegetation_stress_detected": 0,
+            "moisture_deficit_areas": 0,
+            "burn_scar_indicators": 0,
+            "smoke_signatures": 0
+        }
+        
+        # Collect all spectral measurements for analysis
+        all_bands = {band: [] for band in ['B2', 'B3', 'B4', 'B8', 'B8A', 'B11', 'B12']}
+        all_indices = {idx: [] for idx in ['NDVI', 'NDMI', 'NDWI', 'NBR']}
+        
+        coordinates = []
+        confidence_scores = []
+        
+        for pixel in pixels:
+            # Check if pixel has indices (indicates detailed analysis was performed)
+            has_indices = "indices" in pixel
+            is_anomalous = has_indices  # Pixels with indices are flagged as anomalous
+            
+            if is_anomalous:
+                anomalous_pixels.append(pixel)
+                self._update_fire_indicators(pixel, fire_indicators)
+            
+            # Collect coordinates for spatial analysis
+            coordinates.append((pixel.get("latitude", 0), pixel.get("longitude", 0)))
+            
+            # Collect band values
+            bands = pixel.get("bands", {})
+            for band, values_list in all_bands.items():
+                if band in bands:
+                    values_list.append(bands[band])
+            
+            # Collect indices if available
+            if has_indices:
+                indices = pixel.get("indices", {})
+                for idx, values_list in all_indices.items():
+                    if idx in indices:
+                        values_list.append(indices[idx])
+            
+            # Collect confidence scores
+            classification = pixel.get("classification", {})
+            confidence_scores.append(classification.get("confidence", 95))
+        
+        # Calculate spatial distribution metrics
+        spatial_metrics = self._calculate_spatial_distribution(coordinates, anomalous_pixels)
+        
+        # Calculate spectral statistics
+        spectral_metrics = self._calculate_spectral_statistics(all_bands, all_indices, anomalous_pixels)
+        
+        return {
+            "anomalous_count": len(anomalous_pixels),
+            "total_count": len(pixels),
+            "anomaly_percentage": round((len(anomalous_pixels) / len(pixels)) * 100, 2) if pixels else 0.0,
+            "affected_area_km2": len(anomalous_pixels) * self.pixel_area_km2,
+            "avg_confidence": round(sum(confidence_scores) / len(confidence_scores), 1),
+            "fire_indicators": fire_indicators,
+            "spectral_metrics": spectral_metrics,
+            "spatial_metrics": spatial_metrics,
+            "anomalous_pixels": anomalous_pixels
+        }
+    
+    def _update_fire_indicators(self, pixel: Dict, indicators: Dict) -> None:
+        """Update fire indicator counters based on pixel analysis."""
+        bands = pixel.get("bands", {})
+        indices = pixel.get("indices", {})
+        
+        # High temperature signatures (elevated SWIR bands)
+        if (bands.get("B11", 0) > self.fire_bands_thresholds["B11"] or 
+            bands.get("B12", 0) > self.fire_bands_thresholds["B12"]):
+            indicators["high_temperature_signatures"] += 1
+        
+        # Vegetation stress (low NDVI)
+        if indices.get("NDVI", 1) < self.fire_detection_thresholds["NDVI"]:
+            indicators["vegetation_stress_detected"] += 1
+        
+        # Moisture deficit (low NDMI)
+        if indices.get("NDMI", 1) < self.fire_detection_thresholds["NDMI"]:
+            indicators["moisture_deficit_areas"] += 1
+        
+        # Burn scar indicators (low NBR)
+        if indices.get("NBR", 1) < self.fire_detection_thresholds["NBR"]:
+            indicators["burn_scar_indicators"] += 1
+        
+        # Smoke signatures (elevated red band with specific spectral signature)
+        if (bands.get("B4", 0) > self.fire_bands_thresholds["B4"] and 
+            bands.get("B2", 0) > 0.1):  # Blue band also elevated in smoke
+            indicators["smoke_signatures"] += 1
+    
+    def _calculate_spatial_distribution(self, coordinates: List[Tuple], anomalous_pixels: List[Dict]) -> Dict:
+        """Calculate spatial distribution metrics of detected anomalies."""
+        if not anomalous_pixels:
+            return {"cluster_density": 0, "geographic_spread_km2": 0, "hotspot_concentration": 0}
+        
+        # Extract anomalous coordinates
+        anom_coords = [(p.get("latitude", 0), p.get("longitude", 0)) for p in anomalous_pixels]
+        
+        # Calculate geographic spread (bounding box area)
+        if len(anom_coords) > 1:
+            lats, lons = zip(*anom_coords)
+            lat_range = max(lats) - min(lats)
+            lon_range = max(lons) - min(lons)
+            geographic_spread = lat_range * lon_range * 111**2  # Rough km² conversion
+        else:
+            geographic_spread = self.pixel_area_km2
+        
+        # Cluster density (anomalies per unit area)
+        cluster_density = len(anomalous_pixels) / geographic_spread if geographic_spread > 0 else 0
+        
+        # Hotspot concentration (percentage of total area affected)
+        total_possible_area = len(coordinates) * self.pixel_area_km2
+        hotspot_concentration = (len(anomalous_pixels) * self.pixel_area_km2) / total_possible_area * 100
+        
+        return {
+            "cluster_density": round(cluster_density, 4),
+            "geographic_spread_km2": round(geographic_spread, 2),
+            "hotspot_concentration_percent": round(hotspot_concentration, 2)
+        }
+    
+    def _calculate_spectral_statistics(self, all_bands: Dict, all_indices: Dict, anomalous_pixels: List) -> Dict:
+        """Calculate statistical measures of spectral characteristics."""
+        metrics = {}
+        
+        # Band statistics for anomalous pixels only
+        if anomalous_pixels:
+            anom_bands = {band: [] for band in all_bands.keys()}
+            anom_indices = {idx: [] for idx in all_indices.keys()}
+            
+            for pixel in anomalous_pixels:
+                bands = pixel.get("bands", {})
+                indices = pixel.get("indices", {})
+                
+                for band in anom_bands:
+                    if band in bands:
+                        anom_bands[band].append(bands[band])
+                
+                for idx in anom_indices:
+                    if idx in indices:
+                        anom_indices[idx].append(indices[idx])
+            
+            # Calculate averages for anomalous areas
+            metrics["anomalous_band_averages"] = {
+                band: round(sum(values) / len(values), 3) if values else 0
+                for band, values in anom_bands.items()
+            }
+            
+            metrics["anomalous_index_averages"] = {
+                idx: round(sum(values) / len(values), 3) if values else 0
+                for idx, values in anom_indices.items()
+            }
+        
+        # Overall scene statistics
+        metrics["scene_band_averages"] = {
+            band: round(sum(values) / len(values), 3) if values else 0
+            for band, values in all_bands.items()
+        }
+        
+        return metrics
+    
+    def _calculate_environmental_metrics(self, pixels: List[Dict], fire_metrics: Dict) -> Dict:
+        """Calculate environmental risk factors and conditions."""
+        # Analyze vegetation health across the scene
+        vegetation_health = self._assess_vegetation_health(pixels)
+        
+        # Moisture conditions
+        moisture_conditions = self._assess_moisture_conditions(pixels)
+        
+        # Fire weather conditions (based on spectral signatures)
+        fire_weather = self._assess_fire_weather_conditions(fire_metrics)
+        
+        return {
+            "vegetation_health": vegetation_health,
+            "moisture_conditions": moisture_conditions,
+            "fire_weather_indicators": fire_weather,
+            "environmental_stress_level": self._calculate_environmental_stress(vegetation_health, moisture_conditions)
+        }
+    
+    def _assess_vegetation_health(self, pixels: List[Dict]) -> Dict:
+        """Assess overall vegetation health from NDVI and other indicators."""
+        ndvi_values = []
+        for pixel in pixels:
+            if "indices" in pixel and "NDVI" in pixel["indices"]:
+                ndvi_values.append(pixel["indices"]["NDVI"])
+        
+        if not ndvi_values:
+            return {"status": "unknown", "average_ndvi": 0, "healthy_vegetation_percent": 0}
+        
+        avg_ndvi = sum(ndvi_values) / len(ndvi_values)
+        healthy_count = sum(1 for ndvi in ndvi_values if ndvi > 0.2)
+        healthy_percent = (healthy_count / len(ndvi_values)) * 100
+        
+        if avg_ndvi > 0.3:
+            status = "healthy"
+        elif avg_ndvi > 0.1:
+            status = "moderate"
+        else:
+            status = "stressed"
+        
+        return {
+            "status": status,
+            "average_ndvi": round(avg_ndvi, 3),
+            "healthy_vegetation_percent": round(healthy_percent, 1)
+        }
+    
+    def _assess_moisture_conditions(self, pixels: List[Dict]) -> Dict:
+        """Assess moisture conditions from NDMI and NDWI."""
+        ndmi_values = []
+        ndwi_values = []
+        
+        for pixel in pixels:
+            if "indices" in pixel:
+                indices = pixel["indices"]
+                if "NDMI" in indices:
+                    ndmi_values.append(indices["NDMI"])
+                if "NDWI" in indices:
+                    ndwi_values.append(indices["NDWI"])
+        
+        moisture_status = "unknown"
+        if ndmi_values:
+            avg_ndmi = sum(ndmi_values) / len(ndmi_values)
+            if avg_ndmi < -0.2:
+                moisture_status = "very_dry"
+            elif avg_ndmi < 0:
+                moisture_status = "dry"
+            elif avg_ndmi < 0.2:
+                moisture_status = "moderate"
+            else:
+                moisture_status = "moist"
+        
+        return {
+            "status": moisture_status,
+            "average_ndmi": round(sum(ndmi_values) / len(ndmi_values), 3) if ndmi_values else 0,
+            "average_ndwi": round(sum(ndwi_values) / len(ndwi_values), 3) if ndwi_values else 0,
+            "dry_pixel_percent": round(sum(1 for ndmi in ndmi_values if ndmi < -0.1) / len(ndmi_values) * 100, 1) if ndmi_values else 0
+        }
+    
+    def _assess_fire_weather_conditions(self, fire_metrics: Dict) -> Dict:
+        """Assess fire weather conditions based on detected patterns."""
+        indicators = fire_metrics["fire_indicators"]
+        total_pixels = fire_metrics["total_count"]
+        
+        # Calculate percentages of fire indicators
+        temp_signature_percent = (indicators["high_temperature_signatures"] / total_pixels) * 100
+        moisture_deficit_percent = (indicators["moisture_deficit_areas"] / total_pixels) * 100
+        smoke_percent = (indicators["smoke_signatures"] / total_pixels) * 100
+        
+        # Determine fire weather severity
+        if temp_signature_percent > 20 and moisture_deficit_percent > 30:
+            fire_weather_level = "extreme"
+        elif temp_signature_percent > 10 or moisture_deficit_percent > 20:
+            fire_weather_level = "high"
+        elif temp_signature_percent > 5 or moisture_deficit_percent > 10:
+            fire_weather_level = "moderate"
+        else:
+            fire_weather_level = "low"
+        
+        return {
+            "fire_weather_level": fire_weather_level,
+            "temperature_signature_percent": round(temp_signature_percent, 1),
+            "moisture_deficit_percent": round(moisture_deficit_percent, 1),
+            "smoke_detection_percent": round(smoke_percent, 1)
+        }
+    
+    def _calculate_environmental_stress(self, vegetation_health: Dict, moisture_conditions: Dict) -> str:
+        """Calculate overall environmental stress level."""
+        stress_score = 0
+        
+        # Vegetation stress contribution
+        if vegetation_health["status"] == "stressed":
+            stress_score += 3
+        elif vegetation_health["status"] == "moderate":
+            stress_score += 2
+        elif vegetation_health["status"] == "healthy":
+            stress_score += 1
+        
+        # Moisture stress contribution
+        if moisture_conditions["status"] == "very_dry":
+            stress_score += 3
+        elif moisture_conditions["status"] == "dry":
+            stress_score += 2
+        elif moisture_conditions["status"] == "moderate":
+            stress_score += 1
+        
+        if stress_score >= 5:
+            return "critical"
+        elif stress_score >= 4:
+            return "high"
+        elif stress_score >= 2:
+            return "moderate"
+        else:
+            return "low"
+    
+    def _calculate_wildfire_severity(self, fire_metrics: Dict, satellite_data: List[Dict], env_metrics: Dict) -> Tuple[float, str]:
+        """
+        Calculate wildfire severity score adapted from IoT station methodology.
+        Adapted to work with satellite pixel data instead of IoT station data.
+        """
+        anomalous_count = fire_metrics["anomalous_count"]
+        total_count = fire_metrics["total_count"]
+
+        if total_count == 0:
+            return 0.0, "none"
+
+        pixel_ratio = anomalous_count / total_count
+
+        spectral_metrics = fire_metrics["spectral_metrics"]
+        anomalous_averages = spectral_metrics.get("anomalous_band_averages", {})
+        anomalous_indices = spectral_metrics.get("anomalous_index_averages", {})
+
+        max_critical_bands = {
+            "B4": 0.5,
+            "B11": 0.4,
+            "B12": 0.4
+        }
+
+        critical_value_quota = 0
+        measurement_count = 0
+
+        for band, max_value in max_critical_bands.items():
+            if band in anomalous_averages:
+                ratio = anomalous_averages[band] / max_value if max_value > 0 else 0
+                critical_value_quota += ratio
+                measurement_count += 1
+
+        index_weights = {"NDVI": -1, "NDMI": -1, "NDWI": -1, "NBR": -1}
+        for idx, weight in index_weights.items():
+            if idx in anomalous_indices:
+                severity_contribution = abs(anomalous_indices[idx]) * abs(weight)
+                critical_value_quota += severity_contribution
+                measurement_count += 1
+
+        if measurement_count > 0:
+            critical_value_quota = critical_value_quota / measurement_count
+
+        k = 8.0
+        adjusted_pixel_ratio = 1.0 - math.exp(-k * pixel_ratio) if pixel_ratio > 0 else 0
+
+        if pixel_ratio >= 0.05:
+            min_pixel_score = 0.25
+            adjusted_pixel_ratio = max(adjusted_pixel_ratio, min_pixel_score * (pixel_ratio / 0.05))
+
+        base_severity_score = adjusted_pixel_ratio * 0.55 + (critical_value_quota * 0.45)
+
+        fire_indicators = fire_metrics["fire_indicators"]
+
+        has_high_temp = fire_indicators["high_temperature_signatures"] / total_count > 0.1
+        has_moisture_deficit = fire_indicators["moisture_deficit_areas"] / total_count > 0.2
+        has_vegetation_stress = fire_indicators["vegetation_stress_detected"] / total_count > 0.15
+        has_smoke = fire_indicators["smoke_signatures"] / total_count > 0.05
+
+        critical_indicators = sum([has_high_temp, has_moisture_deficit, has_vegetation_stress, has_smoke])
+
+        if critical_indicators >= 2 and pixel_ratio > 0:
+            base_boost = 0.1 * critical_indicators
+            max_boost_threshold = 0.8
+            boost_scale = max(0.3, 1 - (pixel_ratio / max_boost_threshold))
+            effective_boost = min(base_boost * boost_scale, 0.2)
+            severity_score = min(base_severity_score * (1.0 + effective_boost), 1.0)
+        else:
+            severity_score = base_severity_score
+
+        env_stress = env_metrics.get("environmental_stress_level", "low")
+        if env_stress == "critical" and pixel_ratio >= 0.1:
+            context_boost = 0.1
+            severity_score = min(severity_score * (1 + context_boost), 1.0)
+        elif env_stress == "high" and pixel_ratio >= 0.1:
+            context_boost = 0.05
+            severity_score = min(severity_score * (1 + context_boost), 1.0)
+
+        severity_score = min(round(severity_score, 2), 1.0)
+
+        if severity_score >= 0.8:
+            risk_level = "extreme"
+        elif severity_score >= 0.6:
+            risk_level = "high"
+        elif severity_score >= 0.4:
+            risk_level = "moderate"
+        elif severity_score >= 0.2:
+            risk_level = "low"
+        else:
+            risk_level = "minimal"
+
+        return severity_score, risk_level
+
+    
+    def _classify_threat_level(self, severity_score: float) -> Dict[str, Any]:
+        """Classify threat level based on severity score."""
+        if severity_score >= 0.8:
+            return {
+                "level": "CRITICAL",
+                "priority": "immediate_response",
+                "evacuation_consideration": True,
+                "description": "Extreme fire danger with immediate threat to life and property"
+            }
+        elif severity_score >= 0.6:
+            return {
+                "level": "HIGH",
+                "priority": "urgent_response",
+                "evacuation_consideration": True,
+                "description": "High fire danger requiring immediate attention and resource deployment"
+            }
+        elif severity_score >= 0.4:
+            return {
+                "level": "MODERATE",
+                "priority": "monitor_closely",
+                "evacuation_consideration": False,
+                "description": "Moderate fire risk requiring enhanced monitoring and preparation"
+            }
+        elif severity_score >= 0.2:
+            return {
+                "level": "LOW",
+                "priority": "routine_monitoring",
+                "evacuation_consideration": False,
+                "description": "Low fire risk with standard monitoring protocols"
+            }
+        else:
+            return {
+                "level": "MINIMAL",
+                "priority": "standard_monitoring",
+                "evacuation_consideration": False,
+                "description": "Minimal fire risk under normal conditions"
+            }
+    
+    def _generate_recommendations(self, severity_score: float, fire_metrics: Dict) -> List[str]:
+        """Generate actionable recommendations based on analysis."""
+        recommendations = []
+        
+        if severity_score >= 0.6:
+            recommendations.extend([
+                "Deploy fire suppression resources immediately",
+                "Alert emergency services and evacuation authorities",
+                "Establish incident command structure",
+                "Monitor weather conditions for wind changes"
+            ])
+        elif severity_score >= 0.4:
+            recommendations.extend([
+                "Position fire suppression resources for rapid deployment",
+                "Increase aerial surveillance frequency",
+                "Alert local fire departments and emergency services",
+                "Prepare evacuation routes and shelters"
+            ])
+        elif severity_score >= 0.2:
+            recommendations.extend([
+                "Enhance monitoring of detected hotspots",
+                "Deploy ground crews for verification",
+                "Review and update evacuation plans"
+            ])
+        
+        # Area-specific recommendations
+        affected_area = fire_metrics["affected_area_km2"]
+        if affected_area > 100:
+            recommendations.append("Coordinate with multiple fire departments due to large affected area")
+        elif affected_area > 50:
+            recommendations.append("Consider mutual aid agreements with neighboring departments")
+        
+        # Environmental condition recommendations
+        fire_indicators = fire_metrics["fire_indicators"]
+        if fire_indicators["moisture_deficit_areas"] > fire_metrics["total_count"] * 0.3:
+            recommendations.append("Implement water drop missions due to severe moisture deficit")
+        
+        if fire_indicators["smoke_signatures"] > 0:
+            recommendations.append("Issue air quality warnings for surrounding communities")
+        
+        return recommendations
+        
+    def _create_normal_event(self, satellite_data: List[Dict], fire_metrics: Dict) -> Dict[str, Any]:
+        """
+        Create a normal event payload when no fire anomalies are detected.
+        Simplified hardcoded solution for baseline monitoring.
+        """
+        return {
+            "detection_summary": {
+                "total_pixels": len(satellite_data),
+                "anomalous_pixels": fire_metrics["anomalous_count"],
+                "anomaly_percentage": fire_metrics["anomaly_percentage"],
+                "affected_area_km2": fire_metrics["affected_area_km2"],
+                "confidence_level": fire_metrics["avg_confidence"]
+            },
+            "fire_indicators": fire_metrics["fire_indicators"],
+            "spectral_analysis": fire_metrics["spectral_metrics"],
+            "environmental_assessment": {
+                "vegetation_health": {
+                    "status": "unknown",  
+                    "average_ndvi": 0.0,
+                    "healthy_vegetation_percent": 0.0
+                },
+                "moisture_conditions": {
+                    "status": "unknown",  
+                    "average_ndmi": 0.0,
+                    "average_ndwi": 0.0,
+                    "dry_pixel_percent": 0.0
+                },
+                "fire_weather_indicators": {
+                    "fire_weather_level": "unknown", 
+                    "temperature_signature_percent": 0.0,
+                    "moisture_deficit_percent": 0.0,
+                    "smoke_detection_percent": 0.0
+                },
+                "environmental_stress_level": "unknown"
+            },
+            "severity_assessment": {
+                "severity_score": 0.0,
+                "risk_level": "none",
+                "threat_classification": {
+                    "level": "NORMAL",
+                    "priority": "routine_monitoring",
+                    "evacuation_consideration": False,
+                    "description": "Normal conditions with no fire indicators detected"
+                }
+            },
+            "spatial_distribution": fire_metrics["spatial_metrics"],            
+            "recommendations": [
+                "Continue routine monitoring schedule",
+                "Maintain current observation protocols"
+            ]
+        }
+
+
+class GoldMetricsFunctions(MapFunction):
+    """
+    Enhanced Gold Metrics Functions for satellite-based wildfire detection.
+    Integrates comprehensive wildfire analysis with severity scoring.
+    """
+    
+    def __init__(self):
+        self.wildfire_detector = SatelliteWildfireDetector(FIRE_DETECTION_THRESHOLDS,
+                                                           FIRE_BAND_THRESHOLDS,
+                                                           PIXEL_AREA_KM2)
+    
+    def map(self, value: str) -> str:
+        """
+        Process satellite data through wildfire detection and enrichment pipeline.
+        
+        Args:
+            value: JSON string containing satellite imagery data
+            
+        Returns:
+            Enriched JSON string with comprehensive wildfire analysis
+        """
+        try:
+            # Process through wildfire detector
+            enriched_result = self.wildfire_detector.map(value)
+            
+            # Log critical findings
+            data = json.loads(enriched_result)
+            if "wildfire_analysis" in data:
+                analysis = data["wildfire_analysis"]
+                severity = analysis.get("severity_assessment", {}).get("severity_score", 0.0)
+
+                if severity >= 0.4:
+                    logger.warning(f"Wildfire detected with severity {severity} covering "
+                                 f"{analysis['detection_summary']['affected_area_km2']} km²")
+            
+            return enriched_result
+            
+        except Exception as e:
+            logger.error(f"Failed to process satellite data in GoldMetricsFunctions: {e}")
+            return value
 
 
 def wait_for_minio_ready(
@@ -582,7 +1278,7 @@ def main():
 
     # Filter and indices computations
     processed_stream = (
-        ds.key_by(lambda x: json.loads(x).get("metadata", {}).get("macroarea_id"), key_type=Types.STRING()) # Processing macroarea in parallel
+        ds.key_by(lambda x: json.loads(x).get("metadata", {}).get("microarea_id"), key_type=Types.STRING()) # Processing macroarea in parallel
         .map(IndexAndClassifyFunction(INDICES_THRESHOLDS, BANDS_THRESHOLDS), output_type=Types.STRING())
         .map(EnrichFromRedis(), output_type=Types.STRING())
     )
@@ -590,10 +1286,12 @@ def main():
     # Save each processed record to MinIO
     processed_stream.map(S3MinIOSinkSilver(), output_type=Types.STRING())
 
+    gold_layer_stream = processed_stream.map(GoldMetricsFunctions(), output_type=Types.STRING())
+
+    gold_layer_stream.map(S3MinIOSinkGold(), output_type=Types.STRING())
 
     logger.info("Executing Flink job")
     env.execute("IoT Measurements Processing Pipeline")
-    logger.info("Flink job execution initiated")
 
 
 if __name__ == "__main__":
