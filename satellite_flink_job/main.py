@@ -3,7 +3,6 @@
     Comment here!
 """
 
-
 # Utiliies 
 from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
 from pyflink.datastream.connectors import FlinkKafkaConsumer

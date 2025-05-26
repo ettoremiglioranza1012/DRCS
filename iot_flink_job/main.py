@@ -22,7 +22,6 @@ Dependencies:
     - boto3
 """
 
-
 # Utilities
 from data_templates import THRESHOLDS, SENT_NOTIFICATION_TO, ENVIRONMENTAL_CONTEXT, AT_RISK_ASSETS, RECOMMENDED_ACTIONS
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner

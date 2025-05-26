@@ -153,13 +153,10 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
                 # Create str area id
                 macroarea_id = f"A{macroarea_i}"
 
-                # Hashing Key to identify partition
-                key = macroarea_id.encode('utf8')
-
                 # Asynchronous sending
                 for record in records:
                     value = json.dumps(record)
-                    producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                    producer.send(topic, value=value).add_callback(on_send_success).add_errback(on_send_error)
                 logger.info("Message sent successfully.")
             
             except KafkaError as e:

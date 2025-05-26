@@ -11,6 +11,7 @@ import random
 import logging
 import pickle
 import re
+import os
 
 
 # Configure logging with timestamps
@@ -23,17 +24,14 @@ app = FastAPI()
 ALL_LABELS = SIGNAL_CATEGORIES + NOISE_CATEGORIES
 
 
-class SimpleTfidfClassifier:
+class ImprovedTfidfClassifier:
     def __init__(self):
-        # Initialize TF-IDF vectorizer
         self.vectorizer = TfidfVectorizer(
             lowercase=True,
-            max_features=5000,  # Limit vocabulary size
-            stop_words='english',  # Remove common words
-            ngram_range=(1, 2)  # Use unigrams and bigrams
+            max_features=5000,
+            stop_words='english',
+            ngram_range=(1, 2)
         )
-        
-        # Pre-compute label embeddings
         self.label_embeddings = {}
         self.is_fitted = False
     
@@ -44,66 +42,78 @@ class SimpleTfidfClassifier:
         text = re.sub(r'[^\w\s]', '', text)
         return text
     
-    def fit(self, texts):
-        """Fit the vectorizer with some sample texts"""
-        preprocessed_texts = [self.preprocess_text(text) for text in texts]
-        self.vectorizer.fit(preprocessed_texts)
+    def fit(self, texts_by_label):
+        """Fit vectorizer with all texts and prepare label embeddings
+        
+        Args:
+            texts_by_label: Dict mapping labels to lists of example texts
+        """
+        # Flatten all texts for vectorizer training
+        all_texts = []
+        for texts in texts_by_label.values():
+            all_texts.extend(texts)
+            
+        # Fit vectorizer on all texts
+        self.vectorizer.fit(all_texts)
+        
+        # Create label embeddings by averaging embeddings of their examples
+        for label, texts in texts_by_label.items():
+            if texts:
+                # Preprocess texts
+                preprocessed_texts = [self.preprocess_text(text) for text in texts]
+                # Get TF-IDF for all examples of this label
+                vectors = self.vectorizer.transform(preprocessed_texts).toarray()
+                # Average them to get label embedding
+                label_vector = vectors.mean(axis=0)
+                # Normalize
+                norm = np.linalg.norm(label_vector)
+                if norm > 0:
+                    label_vector = label_vector / norm
+                self.label_embeddings[label] = label_vector
+                
         self.is_fitted = True
         return self
     
     def get_embedding(self, text):
         """Get TF-IDF embedding for a text"""
         if not self.is_fitted:
-            raise ValueError("Vectorizer not fitted. Call fit() with sample texts first.")
-        
-        preprocessed = self.preprocess_text(text)
-        vector = self.vectorizer.transform([preprocessed])
-        # Convert sparse vector to dense and normalize
+            raise ValueError("Vectorizer not fitted")
+
+        processed_text = self.preprocess_text(text)
+        vector = self.vectorizer.transform([processed_text])
         embedding = vector.toarray()[0]
-        # Avoid division by zero
+        
+        # Normalize
         norm = np.linalg.norm(embedding)
         if norm > 0:
             embedding = embedding / norm
+            
         return embedding
     
-    def cache_label_embedding(self, label):
-        """Cache embedding for a label"""
-        if label not in self.label_embeddings:
-            self.label_embeddings[label] = self.get_embedding(label)
-        return self.label_embeddings[label]
-    
     def classify(self, text, candidate_labels):
-        """Calculate similarity between text and candidate labels"""
-        # Get text embedding
+        """Calculate similarity between text and label embeddings"""
         text_embedding = self.get_embedding(text)
-        
         scores = []
+        
         for label in candidate_labels:
-            # Get or compute label embedding
-            label_embedding = self.cache_label_embedding(label)
-            
-            # Calculate similarity (1 - cosine distance)
-            # Handle zero vectors
-            if np.sum(label_embedding) == 0 or np.sum(text_embedding) == 0:
-                similarity = 0.0
-            else:
-                similarity = 1 - cosine(text_embedding, label_embedding)
-            
+            if label not in self.label_embeddings:
+                # Skip labels we don't have embeddings for
+                continue
+                
+            label_embedding = self.label_embeddings[label]
+            similarity = 1 - cosine(text_embedding, label_embedding)
             scores.append(similarity)
-        
-        # Convert to list of (label, score) pairs
+            
+        # Create and sort results
         label_scores = list(zip(candidate_labels, scores))
-        
-        # Sort by score in descending order
         label_scores.sort(key=lambda x: x[1], reverse=True)
         
-        result = {
+        return {
             "sequence": text,
             "labels": [label for label, _ in label_scores],
             "scores": [float(score) for _, score in label_scores]
         }
         
-        return result
     
     def save(self, filepath):
         """Save the classifier to a file"""
@@ -123,27 +133,35 @@ def fill_template(template: str) -> str:
         if f"{{{key}}}" in template
     })
 
-# Genera testi sintetici da tutti i template definiti
-def generate_training_texts():
-    samples = []
-    for category_templates in TEMPLATES.values():
-        for template in category_templates:
-            # Genera più varianti di ogni template per migliorare la copertura
-            samples.extend([fill_template(template) for _ in range(3)])
-    return samples
+# Generates synthetic texts from all the defined templates
+def generate_training_texts_by_label():
+    texts_by_label = {}
+    for label, templates in TEMPLATES.items():
+        texts_by_label[label] = []
+        for template in templates:
+            # Generate multiple variants
+            texts_by_label[label].extend([fill_template(template) for _ in range(3)])
+    return texts_by_label
 
-SAMPLE_TEXTS = generate_training_texts()
 
-# Initialize classifier
-try:
-    # Try to load from file if exists
-    classifier = SimpleTfidfClassifier.load('tfidf_classifier.pkl')
-    logging.info("Model loaded from file")
-except:
-    # Or create and fit a new one
-    classifier = SimpleTfidfClassifier().fit(SAMPLE_TEXTS)
-    classifier.save('tfidf_classifier.pkl')
-    logging.info("New model created and saved")
+# Initialize classifier - either load from file or create new
+classifier_path = 'tfidf_classifier.pkl'
+if os.path.exists(classifier_path):
+    try:
+        classifier = ImprovedTfidfClassifier.load(classifier_path)
+    except (AttributeError, ModuleNotFoundError, pickle.PicklingError):
+        # If loading fails, create a new classifier
+        print("Failed to load existing classifier, creating new one...")
+        classifier = ImprovedTfidfClassifier()
+        texts_by_label = generate_training_texts_by_label()
+        classifier.fit(texts_by_label)
+        classifier.save(classifier_path)
+else:
+    # Initialize and train with synthetic data if no saved model exists
+    classifier = ImprovedTfidfClassifier()
+    texts_by_label = generate_training_texts_by_label()
+    classifier.fit(texts_by_label)
+    classifier.save(classifier_path)
 
 @app.get("/health")
 async def health_check():
@@ -156,18 +174,20 @@ async def classify_message(request: Request):
     for msg in data:
         message = msg.get("text", "")
         labels = msg.get("labels", ALL_LABELS)  # default to ALL_LABELS if none provided
-
+        
         if not message:
             results.append({
                 "error": "Missing 'text' field",
                 "input": msg
             })
             continue
-
+            
+        # Pass the message directly to classify
         result = classifier.classify(message, candidate_labels=labels)
+        
         try:
             nlp_msg = {
-                "message": result["sequence"], 
+                "message": result["sequence"],
                 "category": result["labels"][0],
                 "unique_msg_id": msg["unique_msg_id"],
                 "macroarea_id": msg["macroarea_id"],
@@ -176,26 +196,13 @@ async def classify_message(request: Request):
                 "longitude": msg["longitude"],
                 "timestamp": msg["timestamp"]
             }
+            results.append(nlp_msg)
         except Exception as e:
             print(f"Failed to parse message metadata to nlp output, cause: {e}")
-        
-        results.append(nlp_msg)
-
+            results.append({
+                "error": str(e),
+                "input": msg
+            })
+            
     return JSONResponse(content=results)
-
-
-@app.post("/train")
-async def train_model(request: Request):
-    """Endpoint to add more training texts"""
-    data = await request.json()
-    texts = data.get("texts", [])
-    
-    if not texts or not isinstance(texts, list):
-        return {"error": "Provide a list of texts in the 'texts' field"}
-    
-    # Update the model with new texts
-    classifier.fit(texts)
-    classifier.save('tfidf_classifier.pkl')
-    
-    return {"status": "success", "message": f"Model updated with {len(texts)} new texts"}
 

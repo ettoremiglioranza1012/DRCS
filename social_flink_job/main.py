@@ -3,7 +3,6 @@
     Comment here!
 """
 
-
 # Utilities
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
 from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
