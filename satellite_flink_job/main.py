@@ -901,6 +901,9 @@ class SatelliteWildfireDetector(MapFunction):
         """
         Calculate wildfire severity score adapted from IoT station methodology.
         Adapted to work with satellite pixel data instead of IoT station data.
+        To better understand the choice made in the contruction of this function
+        refer to the documentation on the severity computations function in the 
+        IoT flink job, which has more comprehensive commenting. 
         """
         anomalous_count = fire_metrics["anomalous_count"]
         total_count = fire_metrics["total_count"]

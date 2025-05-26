@@ -827,6 +827,16 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
                 "anomaly_detected": False,
                 "anomaly_type": None
             },
+            "environmental_context": ENVIRONMENTAL_CONTEXT,
+            "system_response": {
+                "event_triggered": None,
+                "alert_level": None,
+                "action_taken": None,
+                "automated": True,
+                "at_risk_assets": None,
+                "recommended_actions": None,
+                "sent_notifications_to": None
+            },            
             "stations": gold_data_stations
         }
         
