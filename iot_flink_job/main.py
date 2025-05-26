@@ -22,7 +22,6 @@ Dependencies:
     - boto3
 """
 
-
 # Utilities
 from data_templates import THRESHOLDS, SENT_NOTIFICATION_TO, ENVIRONMENTAL_CONTEXT, AT_RISK_ASSETS, RECOMMENDED_ACTIONS
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
@@ -828,6 +827,16 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
                 "anomaly_detected": False,
                 "anomaly_type": None
             },
+            "environmental_context": ENVIRONMENTAL_CONTEXT,
+            "system_response": {
+                "event_triggered": None,
+                "alert_level": None,
+                "action_taken": None,
+                "automated": True,
+                "at_risk_assets": None,
+                "recommended_actions": None,
+                "sent_notifications_to": None
+            },            
             "stations": gold_data_stations
         }
         
@@ -1385,7 +1394,6 @@ def main():
 
     logger.info("Executing Flink job")
     env.execute("IoT Measurements Processing Pipeline")
-    logger.info("Flink job execution initiated")
 
 
 if __name__ == "__main__":

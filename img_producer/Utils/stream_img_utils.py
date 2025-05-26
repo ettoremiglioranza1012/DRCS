@@ -186,11 +186,8 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
                 # Assign to value for clarity
                 value = img_payload_str
                 
-                # Hashing Key to identify partition
-                key = macroarea_id.encode('utf8')
-                
                 # Asynchronous sending
-                producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                producer.send(topic, value=value).add_callback(on_send_success).add_errback(on_send_error)
                 logger.info("Message sent successfully.")
             
             except KafkaError as e:

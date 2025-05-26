@@ -3,7 +3,6 @@
     Comment here!
 """
 
-
 # Utilities
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
 from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
@@ -633,7 +632,6 @@ def main():
     # Execute the job
     logger.info("Executing Flink job")
     env.execute("Social Media Processing Pipeline")
-    logger.info("Flink job execution initiated")
 
 
 if __name__ == "__main__":

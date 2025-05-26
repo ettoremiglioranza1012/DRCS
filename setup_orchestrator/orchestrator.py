@@ -16,5 +16,4 @@ def run_script(script_name):
 
 if __name__ == "__main__":
     run_script("geo_grid_processor.py")
-    run_script("kafka_cluster_config.py")
     run_script("preload_redis.py") 

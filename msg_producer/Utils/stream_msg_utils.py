@@ -138,11 +138,8 @@ def stream_micro_msg(macroarea_i: int, microarea_i: int):
                 # Convert payload in str
                 value = json.dumps(message)
                 
-                # Hashing Key to identify partition
-                key = message["macroarea_id"].encode('utf8')
-                
                 # Asynchronous sending
-                producer.send(topic, key=key, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                producer.send(topic, value=value).add_callback(on_send_success).add_errback(on_send_error)
                 logger.info("Message sent successfully.")
             
             except KafkaError as e:
