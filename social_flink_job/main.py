@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # Kafka configuration - Kafka topic name and access point
 ORIGINAL_KAFKA_TOPIC = "social_msg"
 NLP_KAFKA_TOPIC = "nlp_social_msg"
+GOLD_SOCIAL_TOPIC = "gold_social"
 KAFKA_SERVERS = "kafka:9092"
 
 # MinIO configuration - read from environment variables if available
@@ -221,6 +222,8 @@ class S3MinIOSinkGold(S3MinIOSinkBase):
         
         except Exception as e:
             logger.error(f"Error while saving to gold layer: {str(e)}")
+        
+        return value
 
 
 class SendToNLPProcessWindowFunction(ProcessWindowFunction):
@@ -290,10 +293,11 @@ class SinkToKafkaTopic(MapFunction):
     each message individually to a Kafka topic for further processing.
     """
     
-    def __init__(self):
+    def __init__(self, topic:str):
         """Initialize the Kafka sink."""
         self.producer = None
         self.bootstrap_servers = ['kafka:9092']
+        self.topic = topic
 
     def open(self, runtime_context: Any) -> None:
         """
@@ -336,12 +340,10 @@ class SinkToKafkaTopic(MapFunction):
             for record in records:
                 try:
                     value = json.dumps(record)
-                    key = record.get("macroarea_id", "UNKNOWN").encode("utf-8")
-                    topic = NLP_KAFKA_TOPIC
+                    topic = self.topic
 
                     self.producer.send(
                         topic, 
-                        key=key,
                         value=value
                     ).add_callback(self.on_send_success).add_errback(self.on_send_error)                      
                     
@@ -596,7 +598,7 @@ def main():
     )
 
     # Sink aggregated result to kafka topic 'nlp_processed'
-    processed_stream.map(SinkToKafkaTopic())
+    processed_stream.map(SinkToKafkaTopic(NLP_KAFKA_TOPIC))
 
     nlp_properties = {
         'bootstrap.servers': KAFKA_SERVERS,
@@ -627,7 +629,10 @@ def main():
     )
 
     # Save filtered messages to Gold layer
-    filtered_stream.map(S3MinIOSinkGold())
+    filtered_stream.map(S3MinIOSinkGold(), output_type=Types.STRING())
+
+    # Sink dashboard-ready data to kafka
+    filtered_stream.map(SinkToKafkaTopic(GOLD_SOCIAL_TOPIC))
 
     # Execute the job
     logger.info("Executing Flink job")

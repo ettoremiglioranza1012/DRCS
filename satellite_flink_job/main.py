@@ -20,6 +20,8 @@ from data_templates import (
 
 from typing import List, Dict, Any, Tuple, Union
 from kafka.admin import KafkaAdminClient
+from kafka.producer import KafkaProducer
+from kafka.errors import KafkaError
 from datetime import datetime
 import logging
 import random
@@ -43,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Kafka configuration - Kafka topic name and access point
 KAFKA_TOPIC = "satellite_img"
 KAFKA_SERVERS = "kafka:9092"
+GOLD_SATELLITE_TOPIC = "gold_sat"
 
 # MinIO configuration - read from environment variables if available
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "minio:9000")
@@ -1168,6 +1171,138 @@ class GoldMetricsFunctions(MapFunction):
             return value
 
 
+class SinkToKafkaTopic(MapFunction):
+    """
+    Sinks processed messages to a Kafka topic.
+    
+    This class receives a batch of classified messages from the NLP service and publishes
+    each message individually to a Kafka topic for further processing.
+    """
+    
+    def __init__(self, topic:str):
+        """Initialize the Kafka sink."""
+        self.producer = None
+        self.bootstrap_servers = ['kafka:9092']
+        self.topic = topic
+
+    def open(self, runtime_context: Any) -> None:
+        """
+        Initialize Kafka producer when the function is first called.
+        
+        Args:
+            runtime_context: Flink runtime context
+        """
+        try:
+            logger.info("Connecting to Kafka client to initialize producer...")
+            self.producer = self.create_producer(bootstrap_servers=self.bootstrap_servers)
+            logger.info("Kafka producer initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to create Kafka producer: {str(e)}")
+            # We'll retry in the map function if necessary
+
+    def map(self, values: str) -> None:
+        """
+        Receives a JSON string containing a list of records and sends each record to Kafka.
+        
+        Parameters:
+        -----------
+        values : str
+            A JSON string representing a list of dictionaries/records
+        """
+        # Ensure producer is available or create it
+        if self.producer is None:
+            try:
+                self.producer = self.create_producer(bootstrap_servers=self.bootstrap_servers)
+                logger.info("Kafka producer initialized successfully.")
+            except Exception as e:
+                logger.error(f"Failed to create Kafka producer: {str(e)}")
+                return  # Cannot proceed without producer
+
+        try:
+            # Parse the JSON string back into a Python list
+            records = json.loads(values)
+
+            # Asynchronous sending
+            for record in records:
+                try:
+                    value = json.dumps(record)
+                    topic = self.topic
+
+                    self.producer.send(
+                        topic, 
+                        value=value
+                    ).add_callback(self.on_send_success).add_errback(self.on_send_error)                      
+                    
+                except Exception as e:
+                    record_id = record.get("unique_id", "UNKNOWN")
+                    logging.error(f"Problem during queueing of record: {record_id}. Error: {e}")
+                                
+            # Ensure the message is actually sent before continuing
+            try: 
+                self.producer.flush()
+                logger.info("All messages flushed to kafka.")
+
+            except Exception as e:
+                logger.error(f"Failed to flush messages to Kafka, cause; {e}")
+        
+        except Exception as e:
+            logger.error(f"Unhandled error during streaming procedure: {e}")
+        
+        # Sink operation, nothing to return
+        return
+            
+    def create_producer(self, bootstrap_servers: list[str]) -> KafkaProducer:
+        """
+        Creates a KafkaProducer configured for asynchronous message delivery
+        with standard durability settings (acks='all').
+        Configuration Highlights:
+        --------------------------
+        - Asynchronous Delivery:
+            Messages are sent in the background using callbacks.
+            The program does not block or wait for acknowledgment.
+        - JSON Serialization:
+            Message payloads are serialized to UTF-8 encoded JSON strings.
+        Parameters:
+        -----------
+        bootstrap_servers : list[str]
+            A list of Kafka broker addresses (e.g., ['localhost:9092']).
+        Returns:
+        --------
+        KafkaProducer
+            A configured Kafka producer instance ready for asynchronous send operations.
+        """
+        producer = KafkaProducer(
+            bootstrap_servers=bootstrap_servers,
+            acks='all',
+            retries=5,
+            value_serializer=lambda v: v.encode('utf8')
+        )
+        return producer
+    
+    def on_send_success(self, record_metadata) -> None:
+        """
+        Callback for successful Kafka message delivery.
+        
+        Parameters:
+        -----------
+        record_metadata : kafka.producer.record_metadata.RecordMetadata
+            Metadata containing topic name, partition, and offset of the delivered message.
+        """
+        logger.info(f"[KAFKA ASYNC] Message sent to topic '{record_metadata.topic}', "
+                    f"partition {record_metadata.partition}, offset {record_metadata.offset}")
+
+    def on_send_error(self, excp: KafkaError) -> None:
+        """
+        Callback for failed Kafka message delivery.
+
+        Parameters:
+        -----------
+        excp : KafkaError
+            The exception that occurred during message send.
+        """
+        logger.error(f"[KAFKA ERROR] Failed to send message: {excp}")
+
+
 def wait_for_minio_ready(
     endpoint: str, 
     access_key: str, 
@@ -1288,9 +1423,14 @@ def main():
     # Save each processed record to MinIO
     processed_stream.map(S3MinIOSinkSilver(), output_type=Types.STRING())
 
+    # Calculate relevant metrics for each payload
     gold_layer_stream = processed_stream.map(GoldMetricsFunctions(), output_type=Types.STRING())
 
+    # Persist data to gold layer
     gold_layer_stream.map(S3MinIOSinkGold(), output_type=Types.STRING())
+
+    # Sink dashboard-ready data to kafka
+    gold_layer_stream.map(SinkToKafkaTopic(GOLD_SATELLITE_TOPIC))
 
     logger.info("Executing Flink job")
     env.execute("IoT Measurements Processing Pipeline")

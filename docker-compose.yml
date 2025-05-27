@@ -10,7 +10,7 @@ services:
     ports:
       - "5433:5432"
     networks:
-      - dcrs_net
+      - drcs_net
   
   redis:
     image: redis:7-alpine
@@ -21,7 +21,7 @@ services:
       - "6379:6379"
     restart: always
     networks:
-      - dcrs_net
+      - drcs_net
     
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -33,7 +33,7 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     restart: always
     networks:
-      - dcrs_net
+      - drcs_net
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -52,7 +52,7 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
     restart: always
     networks:
-      - dcrs_net
+      - drcs_net
 
   minio:
     image: minio/minio:latest
@@ -66,7 +66,7 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
     networks:
-      - dcrs_net
+      - drcs_net
 
   setup_orchestrator:
     build:
@@ -78,7 +78,7 @@ services:
       - minio
     restart: "no"  # exit after success
     networks:
-      - dcrs_net
+      - drcs_net
 
   img_producer:
     build:
@@ -88,7 +88,7 @@ services:
       - create_buckets
     restart: always
     networks:
-      - dcrs_net
+      - drcs_net
 
   sens_producer:
     build:
@@ -97,7 +97,7 @@ services:
       - setup_orchestrator
     restart: always
     networks:
-      - dcrs_net
+      - drcs_net
 
   msg_producer:
     build:
@@ -106,7 +106,7 @@ services:
       - setup_orchestrator
     restart: always
     networks:
-      - dcrs_net
+      - drcs_net
 
   create_buckets:
     image: python:3.9
@@ -119,7 +119,7 @@ services:
     command: ["sh", "-c", "pip install boto3 && python create_minio_buckets.py"]
     restart: "no"
     networks:
-      - dcrs_net
+      - drcs_net
 
   nlp_microservice:
     build:
@@ -128,7 +128,7 @@ services:
     ports:
       - "8000:8000"
     networks:
-      - dcrs_net
+      - drcs_net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -149,7 +149,7 @@ services:
       - redis
     restart: on-failure
     networks:
-      - dcrs_net
+      - drcs_net
     environment:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
@@ -169,7 +169,7 @@ services:
       - redis
     restart: on-failure
     networks:
-      - dcrs_net
+      - drcs_net
     environment:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
@@ -189,13 +189,37 @@ services:
       - redis
     restart: on-failure
     networks:
-      - dcrs_net
+      - drcs_net
     environment:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - MINIO_ENDPOINT=minio:9000
+
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: drcs_dashboard
+    ports:
+      - "8501:8501"
+    depends_on:
+      - kafka
+      - zookeeper
+      - iot_flink_jobmanager
+      - social_flink_jobmanager
+      - satellite_flink_jobmanager
+    restart: always
+    networks:
+      - drcs_net
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     
 networks:
-  dcrs_net:
+  drcs_net:
     driver: bridge
 

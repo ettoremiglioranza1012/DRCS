@@ -10,7 +10,7 @@ services:
     ports:
       - "5433:5432"
     networks:
-      - dcrs_net  
+      - drcs_net  
 
   meteo_data_loader:
     build:
@@ -21,7 +21,7 @@ services:
     volumes: 
       - ./meteo_data:/data
     networks:
-      - dcrs_net  
+      - drcs_net  
     restart: "no"
 
   early_warning_model:
@@ -33,9 +33,9 @@ services:
     volumes: 
       - ./meteo_data:/data  
     networks:
-      - dcrs_net  
+      - drcs_net  
     restart: "no"
 
 networks:
-  dcrs_net:  
+  drcs_net:  
     driver: bridge

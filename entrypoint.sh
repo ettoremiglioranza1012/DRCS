@@ -1,5 +1,14 @@
 #!/bin/bash
 
+echo "  ____  ____  ____  ____      "
+echo " |  _ \|    \/ ___|/ ___|     "
+echo " | | | |    _| |   \___ \\    "
+echo " | |_| | |\ \  |__  ___) |    "
+echo " |____/|_| \_\____||____/     "
+echo "                              "
+echo "      DISASTER RESPONSE       "
+echo "     COORDINATION SYSTEM      "
+echo ""
 echo "===================================================="
 echo " EARLY WARNING SYSTEM: INITIALIZING"
 echo "===================================================="
@@ -7,6 +16,7 @@ echo ""
 
 # Step 1: Run the early warning system containers in the background
 echo "[INFO] Launching early warning containers..."
+echo "[WARNING] Please be sure Docker Engine is UP and Running, otherwise all system will crush!"
 docker-compose -f docker-compose.early_warning.yml up --build -d
 
 echo "[INFO] Waiting for 'early_warning_model' container to complete analysis..."
