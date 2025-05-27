@@ -11,7 +11,7 @@ services:
       - "5433:5432"
     networks:
       - dcrs_net
-    
+  
   redis:
     image: redis:7-alpine
     container_name: redis
