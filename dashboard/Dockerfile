@@ -7,7 +7,7 @@ WORKDIR /app
 COPY . .
 
 # Install dependencies
-RUN pip install --no-cache-dir streamlit pandas plotly kafka-python
+RUN pip install --no-cache-dir streamlit pandas plotly kafka-python boto3 Pillow 
 
 # Expose Streamlit default port
 EXPOSE 8501

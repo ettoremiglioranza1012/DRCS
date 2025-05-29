@@ -285,7 +285,7 @@ class SendToNLPProcessWindowFunction(ProcessWindowFunction):
             return ["[]"]  # Return empty JSON array as string
 
 
-class SinkToKafkaTopic(MapFunction):
+class SinkToKafkaNLPTopic(MapFunction):
     """
     Sinks processed messages to a Kafka topic.
     
@@ -351,6 +351,136 @@ class SinkToKafkaTopic(MapFunction):
                     record_id = record.get("unique_id", "UNKNOWN")
                     logging.error(f"Problem during queueing of record: {record_id}. Error: {e}")
                                 
+            # Ensure the message is actually sent before continuing
+            try: 
+                self.producer.flush()
+                logger.info("All messages flushed to kafka.")
+
+            except Exception as e:
+                logger.error(f"Failed to flush messages to Kafka, cause; {e}")
+        
+        except Exception as e:
+            logger.error(f"Unhandled error during streaming procedure: {e}")
+        
+        # Sink operation, nothing to return
+        return
+            
+    def create_producer(self, bootstrap_servers: list[str]) -> KafkaProducer:
+        """
+        Creates a KafkaProducer configured for asynchronous message delivery
+        with standard durability settings (acks='all').
+        Configuration Highlights:
+        --------------------------
+        - Asynchronous Delivery:
+            Messages are sent in the background using callbacks.
+            The program does not block or wait for acknowledgment.
+        - JSON Serialization:
+            Message payloads are serialized to UTF-8 encoded JSON strings.
+        Parameters:
+        -----------
+        bootstrap_servers : list[str]
+            A list of Kafka broker addresses (e.g., ['localhost:9092']).
+        Returns:
+        --------
+        KafkaProducer
+            A configured Kafka producer instance ready for asynchronous send operations.
+        """
+        producer = KafkaProducer(
+            bootstrap_servers=bootstrap_servers,
+            acks='all',
+            retries=5,
+            value_serializer=lambda v: v.encode('utf8')
+        )
+        return producer
+    
+    def on_send_success(self, record_metadata) -> None:
+        """
+        Callback for successful Kafka message delivery.
+        
+        Parameters:
+        -----------
+        record_metadata : kafka.producer.record_metadata.RecordMetadata
+            Metadata containing topic name, partition, and offset of the delivered message.
+        """
+        logger.info(f"[KAFKA ASYNC] Message sent to topic '{record_metadata.topic}', "
+                    f"partition {record_metadata.partition}, offset {record_metadata.offset}")
+
+    def on_send_error(self, excp: KafkaError) -> None:
+        """
+        Callback for failed Kafka message delivery.
+
+        Parameters:
+        -----------
+        excp : KafkaError
+            The exception that occurred during message send.
+        """
+        logger.error(f"[KAFKA ERROR] Failed to send message: {excp}")
+
+
+class SinkToKafkaGoldTopic(MapFunction):
+    """
+    Sinks processed messages to a Kafka topic.
+    
+    This class receives a batch of classified messages from the NLP service and publishes
+    each message individually to a Kafka topic for further processing.
+    """
+    
+    def __init__(self, topic:str):
+        """Initialize the Kafka sink."""
+        self.producer = None
+        self.bootstrap_servers = ['kafka:9092']
+        self.topic = topic
+
+    def open(self, runtime_context: Any) -> None:
+        """
+        Initialize Kafka producer when the function is first called.
+        
+        Args:
+            runtime_context: Flink runtime context
+        """
+        try:
+            logger.info("Connecting to Kafka client to initialize producer...")
+            self.producer = self.create_producer(bootstrap_servers=self.bootstrap_servers)
+            logger.info("Kafka producer initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to create Kafka producer: {str(e)}")
+            # We'll retry in the map function if necessary
+
+    def map(self, values: str) -> None:
+        """
+        Receives a JSON string containing a the gold data, encode and send payload to kafka
+        
+        Parameters:
+        -----------
+        values : str
+            A JSON string representing a dict
+        """
+        # Ensure producer is available or create it
+        if self.producer is None:
+            try:
+                self.producer = self.create_producer(bootstrap_servers=self.bootstrap_servers)
+                logger.info("Kafka producer initialized successfully.")
+            except Exception as e:
+                logger.error(f"Failed to create Kafka producer: {str(e)}")
+                return  # Cannot proceed without producer
+
+        try:
+            # Parse the JSON string into a dict
+            record = json.loads(values)
+
+            # Asynchronous sending
+            try:
+                value = json.dumps(record)
+                topic = self.topic
+                self.producer.send(
+                    topic, 
+                    value=value
+                ).add_callback(self.on_send_success).add_errback(self.on_send_error)                      
+                
+            except Exception as e:
+                record_id = record.get("unique_id", "UNKNOWN")
+                logging.error(f"Problem during queueing of record: {record_id}. Error: {e}")
+                            
             # Ensure the message is actually sent before continuing
             try: 
                 self.producer.flush()
@@ -598,7 +728,7 @@ def main():
     )
 
     # Sink aggregated result to kafka topic 'nlp_processed'
-    processed_stream.map(SinkToKafkaTopic(NLP_KAFKA_TOPIC))
+    processed_stream.map(SinkToKafkaNLPTopic(NLP_KAFKA_TOPIC))
 
     nlp_properties = {
         'bootstrap.servers': KAFKA_SERVERS,
@@ -632,7 +762,7 @@ def main():
     filtered_stream.map(S3MinIOSinkGold(), output_type=Types.STRING())
 
     # Sink dashboard-ready data to kafka
-    filtered_stream.map(SinkToKafkaTopic(GOLD_SOCIAL_TOPIC))
+    filtered_stream.map(SinkToKafkaGoldTopic(GOLD_SOCIAL_TOPIC))
 
     # Execute the job
     logger.info("Executing Flink job")
