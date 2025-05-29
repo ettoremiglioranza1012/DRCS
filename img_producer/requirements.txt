@@ -1,0 +1,7 @@
+numpy
+matplotlib
+Pillow
+boto3
+psycopg2-binary
+kafka-python
+sentinelhub

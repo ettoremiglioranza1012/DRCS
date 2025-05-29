@@ -1,0 +1,225 @@
+
+services:
+  postgres:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: gruppo3
+      POSTGRES_PASSWORD: gruppo3
+      POSTGRES_DB: california_db
+    ports:
+      - "5433:5432"
+    networks:
+      - drcs_net
+  
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    depends_on:
+      - postgres
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - drcs_net
+    
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    restart: always
+    networks:
+      - drcs_net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    restart: always
+    networks:
+      - drcs_net
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Web UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      - drcs_net
+
+  setup_orchestrator:
+    build:
+      context: ./setup_orchestrator
+    depends_on:
+      - postgres
+      - kafka
+      - zookeeper
+      - minio
+    restart: "no"  # exit after success
+    networks:
+      - drcs_net
+
+  img_producer:
+    build:
+      context: ./img_producer
+    depends_on:
+      - setup_orchestrator
+      - create_buckets
+    restart: always
+    networks:
+      - drcs_net
+
+  sens_producer:
+    build:
+      context: ./sens_producer
+    depends_on:
+      - setup_orchestrator
+    restart: always
+    networks:
+      - drcs_net
+
+  msg_producer:
+    build:
+      context: ./msg_producer
+    depends_on:
+      - setup_orchestrator
+    restart: always
+    networks:
+      - drcs_net
+
+  create_buckets:
+    image: python:3.9
+    container_name: create_buckets
+    depends_on:
+      - minio
+    volumes:
+      - ./setup_minio:/scripts
+    working_dir: /scripts
+    command: ["sh", "-c", "pip install boto3 && python create_minio_buckets.py"]
+    restart: "no"
+    networks:
+      - drcs_net
+
+  nlp_microservice:
+    build:
+      context: ./nlp_microservice
+    container_name: nlp_microservice
+    ports:
+      - "8000:8000"
+    networks:
+      - drcs_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  iot_flink_jobmanager:
+    build:
+      context: ./iot_flink_job
+    container_name: iot_flink_jobmanager
+    depends_on:
+      - create_buckets
+      - setup_orchestrator
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - drcs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+
+  social_flink_jobmanager:
+    build:
+      context: ./social_flink_job
+    container_name: social_flink_jobmanager
+    depends_on:
+      - create_buckets
+      - setup_orchestrator
+      - nlp_microservice
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - drcs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+      - NLP_SERVICE_URL=http://nlp_microservice:8000/classify
+    
+  satellite_flink_jobmanager:
+    build:
+      context: ./satellite_flink_job
+    container_name: satellite_flink_jobmanager
+    depends_on:
+      - create_buckets
+      - setup_orchestrator
+      - kafka
+      - zookeeper
+      - minio
+      - redis
+    restart: on-failure
+    networks:
+      - drcs_net
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MINIO_ENDPOINT=minio:9000
+
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: drcs_dashboard
+    ports:
+      - "8501:8501"
+    depends_on:
+      - kafka
+      - zookeeper
+      - iot_flink_jobmanager
+      - social_flink_jobmanager
+      - satellite_flink_jobmanager
+    restart: always
+    networks:
+      - drcs_net
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+networks:
+  drcs_net:
+    driver: bridge
+
