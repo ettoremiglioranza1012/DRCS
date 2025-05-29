@@ -1,11 +1,16 @@
 
 # Utilities
+from streamlit_autorefresh import st_autorefresh
+from streamlit_folium import st_folium
 from kafka import KafkaConsumer
 from datetime import datetime
 from io import BytesIO
 import streamlit as st
 from PIL import Image
 import threading
+import psycopg2
+import folium
+import redis
 import boto3
 import queue
 import json
@@ -185,53 +190,44 @@ def wait_for_minio_ready(
     retry_interval: int = 5
 ) -> None:
     """
-    Wait for MinIO service to be ready and accessible.
-    
-    This function attempts to connect to a MinIO service and verifies it's operational
-    by listing the available buckets. It will retry the connection based on the specified
-    parameters.
-    
-    Args:
-        endpoint: The host:port address of the MinIO service
-        access_key: The MinIO access key for authentication
-        secret_key: The MinIO secret key for authentication
-        max_retries: Maximum number of connection attempts (default: 20)
-        retry_interval: Time in seconds between retry attempts (default: 5)
     """
-    for i in range(max_retries):
+    for _ in range(max_retries):
         try:
-            s3 = boto3.client(
+            s3_client = boto3.client(
                 's3',
                 endpoint_url=f"http://{endpoint}",
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key
             )
-            s3.list_buckets()  # just ping
-            return
+            if s3_client.list_buckets():  # just ping
+                return s3_client
         except Exception:
             time.sleep(retry_interval)
     raise Exception("MinIO is not ready after retries")
 
 
-def create_minio_client():
+def wait_for_redis_ready(
+    max_retries: int = 20,
+    retry_interval: int = 5
+) -> redis.Redis:
     """
-        Comment here!
     """
-    try:
-        # Initialize S3 client for MinIO
-        s3_client = boto3.client(
-            's3',
-            endpoint_url=f"http://{MINIO_ENDPOINT}",
-            aws_access_key_id=MINIO_ACCESS_KEY,
-            aws_secret_access_key=MINIO_SECRET_KEY,
-            region_name='us-east-1',  # Can be any value for MinIO
-            config=boto3.session.Config(signature_version='s3v4')
-        )
-
-        return s3_client
-    except Exception as e:
-        # Re-raise to fail fast if we can't connect to storage
-        raise
+    for _ in range(max_retries):
+        try:
+            client = redis.Redis(
+                host=os.getenv("REDIS_HOST", "redis"),
+                port=int(os.getenv("REDIS_PORT", 6379)),
+                decode_responses=True,
+                socket_timeout=5.0,
+                socket_connect_timeout=5.0,
+                health_check_interval=30
+            )
+            if client.ping():
+                return client
+        except redis.exceptions.ConnectionError:
+            time.sleep(retry_interval)
+    
+    raise Exception("Redis is not ready after maximum retries.")
 
 
 def dashboard():
@@ -277,11 +273,10 @@ def dashboard():
     # Update data from queues
     social_count, iot_count, sat_count = update_all_data_batch(social_queue, iot_queue, sat_queue)
 
-    # Wait for minIO to be ready
-    wait_for_minio_ready(MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY)
-
     if 'minio_client' not in st.session_state:
-        st.session_state.minio_client = create_minio_client()  
+        st.session_state.minio_client = wait_for_minio_ready(MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY) 
+    if 'redis_client' not in st.session_state:
+        st.session_state.redis_client = wait_for_redis_ready()
 
     # ====================================== #
     # ============ DASHBOARD =============== #
@@ -589,9 +584,246 @@ def dashboard():
 
     with tab2:
         st.header("🔧 IoT Environmental Sensors")
+        
         if st.session_state.iot_data:
             latest_iot = st.session_state.iot_data[-1]
-            st.write(latest_iot)
+
+            # """
+            #     TO BE CHANGED; NEEDS REDIS UPDATE; 
+            # """
+            # conn = psycopg2.connect(dbname="california_db", user="gruppo3", password="gruppo3", host="postgres", port="5432")
+            # cur = conn.cursor()
+
+            # cur.execute("SELECT DISTINCT macroarea_id FROM microareas ORDER BY macroarea_id")
+            # macroareas = [row[0] for row in cur.fetchall()]
+            # macroarea = st.selectbox("Select Macroarea", macroareas, key="macroarea_select")
+
+            # # 🔹 Fetch microareas for selected macroarea
+            # cur.execute("SELECT microarea_id FROM microareas WHERE macroarea_id = %s", (macroarea,))
+            # microareas = [row[0] for row in cur.fetchall()]
+            # microarea = st.selectbox("Select Microarea", microareas, key="microarea_select")
+
+            # ==================== HEADER MAIN ====================
+            col1, col2, col3 = st.columns([2, 2, 1])
+
+            with col1:
+                st.metric(
+                    "Event ID", 
+                    latest_iot.get('event_id', 'N/A')
+                )
+            
+            with col2:
+                timestamp_ms = latest_iot.get('latest_event_timestamp')
+                
+                if timestamp_ms is not None:
+                    try:
+                        ts = int(timestamp_ms) / 1000  # converti da ms a s
+                        dt = datetime.fromtimestamp(ts)  # crea oggetto datetime
+                        formatted_ts = dt.strftime('%Y-%m-%d %H:%M:%S')  # formato leggibile
+                    except Exception:
+                        formatted_ts = "Invalid timestamp"
+                else:
+                    formatted_ts = "N/A"
+
+                st.metric("📅 Event Timestamp", formatted_ts)
+            
+            with col3:
+                st.metric(
+                    "Area ID", 
+                    f"{latest_iot.get('region_id', 'N/A')}"
+                )
+
+            microarea_id = latest_iot.get("region_id")
+            redis_key = f"microarea:{microarea_id}"
+
+            if st.session_state.redis_client:
+                region_info_json = st.session_state.redis_client.get(redis_key)
+                region_info = json.loads(region_info_json)
+                min_long = region_info.get("min_long")
+                min_lat = region_info.get("min_lat")
+                max_long = region_info.get("max_long")
+                max_lat = region_info.get("max_lat")
+                
+                # Compute center & polygon
+                center_lat = (min_lat + max_lat) / 2
+                center_long = (min_long + max_long) / 2
+                polygon_coords = [
+                    [min_lat, min_long],
+                    [min_lat, max_long],
+                    [max_lat, max_long],
+                    [max_lat, min_long],
+                    [min_lat, min_long]
+                ]     
+        
+                # Build map
+                m = folium.Map(location=[center_lat, center_long], zoom_start=12)
+                m.fit_bounds(polygon_coords)
+
+                folium.Polygon(
+                    locations=polygon_coords,
+                    color="blue",
+                    weight=2,
+                    fill=True,
+                    fill_color="blue",
+                    fill_opacity=0.1,
+                    tooltip=f"Microarea: {microarea_id}"
+                ).add_to(m)
+
+                st_folium(m, width=800, height=500)
+            
+            else:
+                print(f" Redis client not initiliazed")
+
+            # === AGGREGATE DATA ===
+            st.divider()
+            st.subheader("📊 Aggregated Detection Data")
+            
+            # Estrai i dati aggregati
+            aggregated = latest_iot.get("aggregated_detection", {})
+            environmental = latest_iot.get("environmental_context", {})
+            system_response = latest_iot.get("system_response", {})
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                wildfire_detected = aggregated.get("wildfire_detected", False)
+                st.metric(
+                    "🔥 Wildfire Detection", 
+                    "DETECTED" if wildfire_detected else "CLEAR",
+                    delta=f"{aggregated.get('detection_confidence', 0):.1%} confidence"
+                )
+            
+            with col2:
+                severity = aggregated.get("severity_score", 0)
+                st.metric(
+                    "⚠️ Severity Score", 
+                    f"{severity:.2f}",
+                    delta="High Risk" if severity > 0.7 else "Moderate" if severity > 0.4 else "Low"
+                )
+            
+            with col3:
+                aqi = aggregated.get("air_quality_index", 0)
+                aqi_status = aggregated.get("air_quality_status", "Unknown")
+                st.metric(
+                    "🌬️ Air Quality Index", 
+                    f"{aqi:.1f}",
+                    delta=aqi_status
+                )
+            
+            with col4:
+                alert_level = system_response.get("alert_level", "unknown")
+                st.metric(
+                    "🚨 Alert Level", 
+                    alert_level.replace("_", " ").title(),
+                    delta="ACTIVE" if system_response.get("event_triggered") else "INACTIVE"
+                )
+
+            # === ENVIRONMENTAL CONDITIONS ===
+            st.divider()
+            st.subheader("🌤️ Environmental Conditions")
+            
+            weather = environmental.get("weather_conditions", {})
+            terrain = environmental.get("terrain_info", {})
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Weather Conditions:**")
+                st.write(f"🌡️ Temperature: {weather.get('temperature', 'N/A')}°C")
+                st.write(f"💧 Humidity: {weather.get('humidity', 'N/A')}%")
+                st.write(f"💨 Wind Speed: {weather.get('wind_speed', 'N/A')} km/h")
+                st.write(f"🧭 Wind Direction: {weather.get('wind_direction', 'N/A')}°")
+                st.write(f"🌧️ Precipitation Chance: {weather.get('precipitation_chance', 0)*100:.1f}%")
+            
+            with col2:
+                st.write("**Terrain Information:**")
+                st.write(f"🌿 Vegetation: {terrain.get('vegetation_type', 'N/A').title()}")
+                st.write(f"🌲 Density: {terrain.get('vegetation_density', 'N/A').title()}")
+                st.write(f"⛰️ Slope: {terrain.get('slope', 'N/A').title()}")
+                st.write(f"🧭 Aspect: {terrain.get('aspect', 'N/A').title()}")
+
+            # === FIRE BEHAVOUR ===
+            if "fire_behavior" in aggregated and wildfire_detected:
+                st.divider()
+                st.subheader("🔥 Fire Behavior Analysis")
+                
+                fire_behavior = aggregated["fire_behavior"]
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric(
+                        "Spread Rate", 
+                        fire_behavior.get("spread_rate", "Unknown").title()
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Direction", 
+                        fire_behavior.get("direction", "Unknown").title()
+                    )
+                
+                with col3:
+                    st.metric(
+                        "Speed", 
+                        f"{fire_behavior.get('estimated_speed_mph', 0)} mph"
+                    )
+                
+                ignition_time = aggregated.get("estimated_ignition_time")
+                if ignition_time:
+                    st.info(f"🕐 Estimated Ignition Time: {ignition_time}")
+
+            # === SYSTEM RESPONSE ===
+            st.divider()
+            st.subheader("🚨 System Response")
+            
+            at_risk = system_response.get("at_risk_assets", {})
+            
+            if "population_centers" in at_risk:
+                st.write("**Population Centers at Risk:**")
+                for center in at_risk["population_centers"]:
+                    st.warning(f"🏘️ {center.get('name')}: {center.get('population')} people at {center.get('distance_meters')}m distance (Priority: {center.get('evacuation_priority')})")
+            
+            if "critical_infrastructure" in at_risk:
+                st.write("**Critical Infrastructure at Risk:**")
+                for infra in at_risk["critical_infrastructure"]:
+                    st.error(f"🏭 {infra.get('name')} ({infra.get('type')}): {infra.get('distance_meters')}m distance (Priority: {infra.get('priority')})")
+
+            if "recommended_actions" in system_response:
+                st.write("**Recommended Actions:**")
+                for action in system_response["recommended_actions"]:
+                    priority_color = "🔴" if action.get('priority') == 'high' else "🟡" if action.get('priority') == 'medium' else "🟢"
+                    st.write(f"{priority_color} {action.get('action', '').replace('_', ' ').title()} (Priority: {action.get('priority', 'N/A')})")
+                    
+                    if 'recommended_resources' in action:
+                        resources = ", ".join([r.replace('_', ' ').title() for r in action['recommended_resources']])
+                        st.write(f"   Resources: {resources}")
+                    
+                    if 'radius_meters' in action:
+                        st.write(f"   Radius: {action['radius_meters']}m")
+                    if 'evacuation_direction' in action:
+                        st.write(f"   Direction: {action['evacuation_direction']}")
+
+            if "sent_notifications_to" in system_response:
+                st.write("**Notifications Sent:**")
+                for notification in system_response["sent_notifications_to"]:
+                    status_icon = "✅" if notification.get('delivery_status') == 'confirmed' else "❌"
+                    st.write(f"{status_icon} {notification.get('agency', '').replace('_', ' ').title()} - {notification.get('delivery_status')} at {notification.get('notification_timestamp')}")
+
+            # === TECHNICAL REPORT ===
+            with st.expander("🔧 Technical Information"):
+                st.write(f"**Event ID:** {latest_iot.get('event_id')}")
+                st.write(f"**Region ID:** {latest_iot.get('region_id')}")
+                st.write(f"**Event Type:** {latest_iot.get('event_type', '').title()}")
+                st.write(f"**Detection Source:** {latest_iot.get('detection_source', '').replace('_', ' ').title()}")
+                st.write(f"**Response Timestamp:** {latest_iot.get('response_timestamp')}")
+                st.write(f"**Latest Event Timestamp:** {latest_iot.get('latest_event_timestamp')}")
+                
+                if aggregated.get("anomaly_detected"):
+                    st.write(f"**Anomaly Type:** {aggregated.get('anomaly_type', '').title()}")
+
+        else:
+            st.info("🔄 Waiting for IoT data...")
+            st.write("The system is ready to receive and display real-time IoT environmental data.")
 
     with tab3:
         st.header("📱 Emergency Social Media Monitoring")
@@ -627,8 +859,7 @@ def dashboard():
         st.rerun()
 
     # Auto-refresh every 3 seconds
-    time.sleep(3)
-    st.rerun()
+    st_autorefresh(interval=3000, limit=None, key="global-autorefresh")
 
 
 if __name__ == "__main__":
