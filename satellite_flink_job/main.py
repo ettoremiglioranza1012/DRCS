@@ -1202,12 +1202,12 @@ class SinkToKafkaTopic(MapFunction):
 
     def map(self, values: str) -> None:
         """
-        Receives a JSON string containing a list of records and sends each record to Kafka.
+        Receives a JSON string containing a the gold data, encode and send payload to kafka
         
         Parameters:
         -----------
         values : str
-            A JSON string representing a list of dictionaries/records
+            A JSON string representing a dict
         """
         # Ensure producer is available or create it
         if self.producer is None:
@@ -1219,24 +1219,22 @@ class SinkToKafkaTopic(MapFunction):
                 return  # Cannot proceed without producer
 
         try:
-            # Parse the JSON string back into a Python list
-            records = json.loads(values)
+            # Parse the JSON string into a dict
+            record = json.loads(values)
 
             # Asynchronous sending
-            for record in records:
-                try:
-                    value = json.dumps(record)
-                    topic = self.topic
-
-                    self.producer.send(
-                        topic, 
-                        value=value
-                    ).add_callback(self.on_send_success).add_errback(self.on_send_error)                      
-                    
-                except Exception as e:
-                    record_id = record.get("unique_id", "UNKNOWN")
-                    logging.error(f"Problem during queueing of record: {record_id}. Error: {e}")
-                                
+            try:
+                value = json.dumps(record)
+                topic = self.topic
+                self.producer.send(
+                    topic, 
+                    value=value
+                ).add_callback(self.on_send_success).add_errback(self.on_send_error)                      
+                
+            except Exception as e:
+                record_id = record.get("unique_id", "UNKNOWN")
+                logging.error(f"Problem during queueing of record: {record_id}. Error: {e}")
+                            
             # Ensure the message is actually sent before continuing
             try: 
                 self.producer.flush()
