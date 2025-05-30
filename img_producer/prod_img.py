@@ -4,8 +4,8 @@ from Utils.stream_img_utils import stream_macro_imgs
 
 
 def stream_example():
-    macroarea_i = 5
-    microarea_i = 40
+    macroarea_i = 1
+    microarea_i = 2
     stream_macro_imgs(macroarea_i=macroarea_i, microarea_i=microarea_i)
 
 

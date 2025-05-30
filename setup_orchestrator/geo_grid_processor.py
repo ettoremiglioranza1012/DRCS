@@ -302,7 +302,9 @@ def process_macroareas():
     This function is intended to be run once as part of the initial geodata ingestion phase.
     """
     print("\n[GEO-GRID-PROCESSOR]")
-    n_of_macroareas = 5
+    
+    macro_dir = "Macro_data/Macro_input"
+    n_of_macroareas = len([f for f in os.listdir(macro_dir) if os.path.isfile(os.path.join(macro_dir, f))])
     for i in range(1, n_of_macroareas + 1):
         
         print(f"\n[INFO] Processing macroarea {i}...")
