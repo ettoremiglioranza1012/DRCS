@@ -3,6 +3,7 @@
 import numpy as np
 import time
 import logging
+from scipy.ndimage import gaussian_filter
 
 
 # Logs Configuration
@@ -124,7 +125,7 @@ def filter_image(img: np.ndarray) -> np.ndarray:
     t1 = time.perf_counter()
     fire_mask = generate_fire_mask(
         (h, w),
-        region_top_left=(800, 600),
+        region_top_left=(500, 1100),
         region_size=600,
         threshold=0.7,
         seed=42

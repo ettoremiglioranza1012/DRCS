@@ -150,7 +150,7 @@ def main():
     
     # Auto-refresh
     st_autorefresh(
-        interval=3000, 
+        interval=15000, 
         limit=None, 
         key="global-autorefresh"
     )

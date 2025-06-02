@@ -5,7 +5,7 @@ from Utils.stream_sens_utils import stream_micro_sens
 
 def stream_example():
     macroarea_i = 1
-    microarea_i = 2
+    microarea_i = 10
     stream_micro_sens(macroarea_i=macroarea_i, microarea_i=microarea_i)
 
 

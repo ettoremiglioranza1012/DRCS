@@ -132,9 +132,11 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
             timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
             records = list()
             
+            microarea_bbox, _ = fetch_micro_bbox_from_db(macroarea_i, microarea_i)
             logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")
             for i in range(n_stats):
-                temp_mes = generate_measurements_json(i+1, microarea_i, macroarea_i, timestamp)
+                min_long, min_lat, max_long, max_lat = microarea_bbox
+                temp_mes = generate_measurements_json(i+1, microarea_i, macroarea_i, timestamp, min_long, min_lat, max_long, max_lat)
                 if not temp_mes:
                     logger.error(f"Measurements for 'S_A{macroarea_i}-M{microarea_i}_{i:03}' not consistent, check 'generate_measurements_json()' function.")
                     continue
