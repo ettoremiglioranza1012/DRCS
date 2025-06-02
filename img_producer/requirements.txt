@@ -5,3 +5,4 @@ boto3
 psycopg2-binary
 kafka-python
 sentinelhub
+scipy

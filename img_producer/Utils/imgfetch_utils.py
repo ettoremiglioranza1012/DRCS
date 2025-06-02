@@ -182,26 +182,26 @@ def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bb
         print("No image data to display.")
         return
     image = requested_data[0]
+
+    try:
+        # 1. Generate synthetic metadata (with fire detection)
+        metadata, n_cols, n_rows = firedet_bands_metadata(bbox, microarea_id, macroarea_id)
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to generate metadata: {e}")
+        return None
     
     try:
-        # 1. Filter the image
+        # 2. Filter the image
         filtered_img = filter_image(image)
     except Exception as e:
         logger.error(f"[ERROR] Failed to filter image: {e}")
         return None
 
     try:
-        # 2. Compress image with PIL
+        # 3. Compress image with PIL
         img_bytes = compress_image_with_pil(filtered_img)
     except Exception as e:
         logger.error(f"[ERROR] Failed to compress image: {e}")
-        return None
-
-    try:
-        # 3. Generate synthetic metadata (with fire detection)
-        metadata = firedet_bands_metadata(bbox, microarea_id, macroarea_id)
-    except Exception as e:
-        logger.error(f"[ERROR] Failed to generate metadata: {e}")
         return None
 
     try:

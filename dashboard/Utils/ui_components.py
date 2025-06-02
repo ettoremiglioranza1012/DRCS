@@ -4,6 +4,7 @@
 """
 
 # Utilities
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from datetime import datetime
 from io import BytesIO
@@ -587,7 +588,7 @@ def render_social_tab(latests_msg):
     st.subheader("📥 Latest Classified Social Media Messages")
     # ==================== RECENT MESSAGES DISPLAY ====================
     if latests_msg:
-        # Display last 5 messages in reverse order
+        # Display last 10 messages in reverse order
         for msg in reversed(latests_msg[-10:]):
             timestamp = msg.get("timestamp", "N/A")
             area_id = msg.get("microarea_id", "N/A")
@@ -618,6 +619,8 @@ def render_social_tab(latests_msg):
         st.session_state.map_points = []
     if "map_reset_timestamp" not in st.session_state:
         st.session_state.map_reset_timestamp = datetime.min
+    if "processed_message_ids" not in st.session_state:
+        st.session_state.processed_message_ids = set()
 
     # Buttons to update or reset map
     col_update, col_reset, _ = st.columns([2, 2, 6])
@@ -627,24 +630,61 @@ def render_social_tab(latests_msg):
         reset_clicked = st.button("🔴 Reset Map", key="reset_map_btn", use_container_width=True)
 
     # If update clicked, add new messages with geo-coordinates
-    if update_clicked:
+    if update_clicked and latests_msg:
         new_points = []
-        for msg in latests_msg:
-            if msg.get("latitude") and msg.get("longitude"):
+        for i, msg in enumerate(latests_msg):
+            # Create unique ID for each message
+            msg_id = f"{msg.get('timestamp', '')}_{i}_{msg.get('microarea_id', '')}"
+            
+            # Skip if already processed
+            if msg_id in st.session_state.processed_message_ids:
+                continue
+                
+            # Check if message has coordinates
+            lat = msg.get("latitude")
+            lon = msg.get("longitude")
+            
+            if lat is not None and lon is not None:
                 try:
-                    msg_ts = datetime.strptime(msg["timestamp"], "%Y-%m-%dT%H:%M:%S.%f")
-                    if msg_ts > st.session_state.map_reset_timestamp:
-                        new_points.append(msg)
-                except:
+                    # Validate coordinates
+                    lat_float = float(lat)
+                    lon_float = float(lon)
+                    
+                    # Basic validation for reasonable coordinates
+                    if -90 <= lat_float <= 90 and -180 <= lon_float <= 180:
+                        # Check timestamp if available
+                        try:
+                            if msg.get("timestamp"):
+                                msg_ts = datetime.strptime(msg["timestamp"], "%Y-%m-%dT%H:%M:%S.%f")
+                                if msg_ts > st.session_state.map_reset_timestamp:
+                                    new_points.append(msg)
+                                    st.session_state.processed_message_ids.add(msg_id)
+                            else:
+                                # If no timestamp, add anyway
+                                new_points.append(msg)
+                                st.session_state.processed_message_ids.add(msg_id)
+                        except (ValueError, TypeError):
+                            # If timestamp parsing fails, still add the message
+                            new_points.append(msg)
+                            st.session_state.processed_message_ids.add(msg_id)
+                except (ValueError, TypeError):
+                    # Skip messages with invalid coordinates
                     continue
-        st.session_state.map_points.extend(new_points)
-        st.session_state.map_active = True
+        
+        if new_points:
+            st.session_state.map_points.extend(new_points)
+            st.session_state.map_active = True
+            st.success(f"Added {len(new_points)} new messages to map!")
+        else:
+            st.info("No new messages with valid coordinates found.")
 
     # If reset clicked, clear the map
     if reset_clicked:
         st.session_state.map_points = []
         st.session_state.map_active = False
         st.session_state.map_reset_timestamp = datetime.utcnow()
+        st.session_state.processed_message_ids = set()
+        st.success("Map reset successfully!")
 
     # ======== CATEGORY FILTER FOR MAP ========
     pretty_labels = {
@@ -655,13 +695,14 @@ def render_social_tab(latests_msg):
     }
     label_to_category = {v: k for k, v in pretty_labels.items()}
 
-    with st.container():
-        st.markdown("""
-            <div style="text-align: left; margin-top: 1rem; margin-bottom: 0.5rem;">
-                <span style="font-size: 1.1rem; font-weight: 600;">Select message category to show on map</span>
-            </div>
-        """, unsafe_allow_html=True)
-        selected_label = st.selectbox("", options=list(pretty_labels.values()), key="category_selector", label_visibility="collapsed")
+    # Fix the accessibility warning by providing a proper label
+    st.markdown("**Select message category to show on map:**")
+    selected_label = st.selectbox(
+        "Category Filter", 
+        options=list(pretty_labels.values()), 
+        key="category_selector",
+        label_visibility="collapsed"
+    )
     
     selected_category = label_to_category[selected_label]
 
@@ -676,29 +717,85 @@ def render_social_tab(latests_msg):
     # Create map centered on California
     m = folium.Map(location=[36.7783, -119.4179], zoom_start=6)
 
+    # Track if we have any markers to display
+    markers_added = 0
+    marker_locations = []
+
     if st.session_state.map_active and st.session_state.map_points:
-        cluster = MarkerCluster().add_to(m)
-        for msg in st.session_state.map_points:
-            if msg.get("category") != selected_category:
-                continue
+        # Filter messages by selected category
+        filtered_messages = [msg for msg in st.session_state.map_points 
+                           if msg.get("category") == selected_category]
+        
+        if filtered_messages:
+            # Create marker cluster for better performance
+            cluster = MarkerCluster().add_to(m)
+            
+            for msg in filtered_messages:
+                try:
+                    lat = float(msg["latitude"])
+                    lon = float(msg["longitude"])
+                    content = msg.get("message", "No content")
+                    timestamp = msg.get("timestamp", "N/A")
+                    area_id = msg.get("microarea_id", "N/A")
+                    
+                    # Truncate long messages for popup
+                    if len(content) > 200:
+                        content = content[:200] + "..."
+                    
+                    icon_name, color = icon_map.get(selected_category, ("info-sign", "gray"))
+                    
+                    # Create popup content
+                    popup_content = f"""
+                    <div style="width: 300px;">
+                        <b>Area:</b> {area_id}<br>
+                        <b>Time:</b> {timestamp}<br>
+                        <b>Category:</b> {selected_label}<br>
+                        <hr>
+                        <b>Message:</b><br>
+                        {content}
+                    </div>
+                    """
 
-            lat = msg["latitude"]
-            lon = msg["longitude"]
-            content = msg.get("message", "No content")
-            icon_name, color = icon_map.get(selected_category, ("info-sign", "gray"))
+                    folium.Marker(
+                        location=[lat, lon],
+                        popup=folium.Popup(popup_content, max_width=350),
+                        icon=folium.Icon(color=color, icon=icon_name, prefix="fa")
+                    ).add_to(cluster)
+                    
+                    markers_added += 1
+                    marker_locations.append([lat, lon])
+                    
+                except (ValueError, TypeError, KeyError) as e:
+                    # Skip invalid markers
+                    continue
 
-            folium.Marker(
-                location=[lat, lon],
-                popup=folium.Popup(content, max_width=250),
-                icon=folium.Icon(color=color, icon=icon_name, prefix="fa")
-            ).add_to(cluster)
+            # Adjust map view to fit all markers if we have any
+            if marker_locations:
+                try:
+                    m.fit_bounds(marker_locations)
+                except Exception:
+                    # If fit_bounds fails, keep default view
+                    pass
 
-        # Adjust map to fit all markers
-        lat_lon_list = [(msg["latitude"], msg["longitude"]) for msg in st.session_state.map_points if msg.get("category") == selected_category]
-        if lat_lon_list:
-            m.fit_bounds(lat_lon_list)
-
-    st_folium(m, use_container_width=True, height=600)
+    # Display map with current status
+    col_map, col_status = st.columns([3, 1])
+    
+    with col_map:
+        st_folium(m, use_container_width=True, height=600)
+    
+    with col_status:
+        st.markdown("### Map Status")
+        st.metric("Total Messages", len(st.session_state.map_points))
+        st.metric(f"{selected_label}", markers_added)
+        
+        if st.session_state.map_points:
+            # Show available categories in current data
+            categories_in_data = set(msg.get("category") for msg in st.session_state.map_points)
+            st.markdown("**Available Categories:**")
+            for cat in categories_in_data:
+                if cat in pretty_labels:
+                    count = sum(1 for msg in st.session_state.map_points if msg.get("category") == cat)
+                    st.write(f"• {pretty_labels[cat]}: {count}")
 
     # ==================== CATEGORY COUNT SECTION ====================
     st.divider()
@@ -715,6 +812,8 @@ def render_social_tab(latests_msg):
         st.session_state.category_last_update = None
     if "category_history" not in st.session_state:
         st.session_state.category_history = {cat: [] for cat in all_categories}
+    if "processed_count_message_ids" not in st.session_state:
+        st.session_state.processed_count_message_ids = set()
 
     # Update / Reset buttons
     col_up, col_reset, _ = st.columns([2, 2, 6])
@@ -723,22 +822,54 @@ def render_social_tab(latests_msg):
     with col_reset:
         reset_cat = st.button("🔴 Reset Count", key="reset_cat_btn", use_container_width=True)
 
-    if update_cat:
+    if update_cat and latests_msg:
+        # Store previous counts for delta calculation
+        previous_counts = st.session_state.category_counts.copy()
+        
         # Update counters for new messages
-        for msg in latests_msg:
-            cat = msg.get("category")
-            try:
-                ts = datetime.strptime(msg["timestamp"], "%Y-%m-%dT%H:%M:%S.%f")
-                if cat in st.session_state.category_counts and ts > st.session_state.category_reset_timestamp:
-                    st.session_state.category_counts[cat] += 1
-            except:
+        new_messages_count = 0
+        for i, msg in enumerate(latests_msg):
+            # Create unique ID for each message
+            msg_id = f"{msg.get('timestamp', '')}_{i}_{msg.get('microarea_id', '')}"
+            
+            # Skip if already processed for counting
+            if msg_id in st.session_state.processed_count_message_ids:
                 continue
+                
+            cat = msg.get("category")
+            if cat in st.session_state.category_counts:
+                try:
+                    # Check if message is after reset timestamp
+                    if msg.get("timestamp"):
+                        ts = datetime.strptime(msg["timestamp"], "%Y-%m-%dT%H:%M:%S.%f")
+                        if ts > st.session_state.category_reset_timestamp:
+                            st.session_state.category_counts[cat] += 1
+                            st.session_state.processed_count_message_ids.add(msg_id)
+                            new_messages_count += 1
+                    else:
+                        # If no timestamp, count anyway
+                        st.session_state.category_counts[cat] += 1
+                        st.session_state.processed_count_message_ids.add(msg_id)
+                        new_messages_count += 1
+                except (ValueError, TypeError):
+                    # If timestamp parsing fails, still count the message
+                    st.session_state.category_counts[cat] += 1
+                    st.session_state.processed_count_message_ids.add(msg_id)
+                    new_messages_count += 1
 
         st.session_state.category_last_update = datetime.utcnow()
+        
+        if new_messages_count > 0:
+            st.success(f"Processed {new_messages_count} new messages!")
+        else:
+            st.info("No new messages to count.")
 
-        # Keep only last 2 history points for delta calculation
+        # Update history for delta calculation
         for cat in all_categories:
+            if len(st.session_state.category_history[cat]) == 0:
+                st.session_state.category_history[cat].append(previous_counts[cat])
             st.session_state.category_history[cat].append(st.session_state.category_counts[cat])
+            # Keep only last 2 history points
             if len(st.session_state.category_history[cat]) > 2:
                 st.session_state.category_history[cat] = st.session_state.category_history[cat][-2:]
 
@@ -747,6 +878,8 @@ def render_social_tab(latests_msg):
         st.session_state.category_reset_timestamp = datetime.utcnow()
         st.session_state.category_last_update = None
         st.session_state.category_history = {cat: [] for cat in all_categories}
+        st.session_state.processed_count_message_ids = set()
+        st.success("Category counts reset successfully!")
 
     # Show last update timestamp
     if st.session_state.category_last_update:
@@ -762,10 +895,10 @@ def render_social_tab(latests_msg):
         history = st.session_state.category_history[cat]
 
         if len(history) < 2:
-            delta = "+0"
+            delta = None
         else:
             diff = history[-1] - history[-2]
-            delta = f"+{diff}" if diff > 0 else str(diff)
+            delta = f"+{diff}" if diff > 0 else str(diff) if diff != 0 else None
 
         with cols[idx]:
             st.metric(

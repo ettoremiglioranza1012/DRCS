@@ -1,9 +1,9 @@
 
 # Utilities
 from botocore.client import Config
-from datetime import datetime
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple
+from datetime import datetime
 from PIL import Image
 import numpy as np
 import logging
@@ -55,7 +55,7 @@ class PixelLocationManager():
         
         if location_id not in self.locations.keys():
             self.locations[location_id] = []
-            centroids_pixels = self._divide_microarea(
+            centroids_pixels, n_cols, n_rows = self._divide_microarea(
                 min_long,
                 min_lat,
                 max_long,
@@ -66,7 +66,7 @@ class PixelLocationManager():
                 curr_label, curr_lat, curr_long = value
                 self.locations[location_id].append((curr_label, curr_lat, curr_long))
         
-        return self.locations[location_id]
+        return self.locations[location_id], n_cols, n_rows
 
     def _divide_microarea(
             self,
@@ -75,7 +75,7 @@ class PixelLocationManager():
             max_long: float,
             max_lat: float,
             max_area_km2: float = 20
-    ):
+    ) -> list[Tuple]:
         """
             Comment Here!
         """
@@ -104,26 +104,34 @@ class PixelLocationManager():
 
         for i in range(n_rows):
             for j in range(n_cols):
+
+                # Cells boundaries and centroids
                 cell_min_long = min_long + j * long_step
                 cell_max_long = cell_min_long + long_step
                 cell_min_lat = min_lat + i * lat_step
                 cell_max_lat = cell_min_lat + lat_step
-                
+
                 centroid_lat = (cell_min_lat + cell_max_lat) / 2
                 centroid_long = (cell_min_long + cell_max_long) / 2
 
-                if 2 < i < 5 and 2 < j < 5:
-                    label = "wildfire"
-                else:
-                    label = "vegetation"
+                # Dynamic center calculation
+                center_row_start = n_rows // 3
+                center_row_end = (2 * n_rows) // 3
+                center_col_start = n_cols // 3  
+                center_col_end = (2 * n_cols) // 3
 
+                if center_row_start <= i < center_row_end and center_col_start <= j < center_col_end:
+                    label = "wildfire"                
+                else:
+                    label = "vegetation"                
+                
                 cells_centroids.append((
                     label,
                     centroid_lat, 
                     centroid_long
                 ))
 
-        return cells_centroids
+        return cells_centroids, n_cols, n_rows
 
 
 def compress_image_with_pil(img: np.ndarray, quality: int = 85) -> bytes:
@@ -204,20 +212,6 @@ def generate_pixel_data(label: str, lat: float, lon: float, microarea_id: str, f
     """
         To comment!
     """
-    # pixel_id = f"{str(lat)}_{str(lon)}_{microarea_id}"
-
-    # # Deterministic fire_event based on pixel location hash
-    # hash_digest = hashlib.md5(pixel_id.encode()).hexdigest()
-    # # Example: "a1b2c3d4e5f6789012345678abcdef90"
-    # # Uniform Distribution: MD5 hash distributes values uniformly across 0-99 range
-    # hash_value = int(hash_digest[:8], 16) # Use part of hash to avoid full int overflow
-    # # Takes first 8 chars: "a1b2c3d4" → converts to integer
-    # # Example: 2712847316 (decimal)
-    # is_fire = (hash_value % 100) < fire_probability # 20% of pixels deterministically simulate fire
-    # # 2712847316 % 100 = 16
-    # # If fire_probability = 20: 16 < 20 → True (fire)
-    # # If fire_probability = 20: 85 < 20 → False (no fire)
-    # # 20% chance of getting a value under 20
 
     if label == "wildfire":
         # Simulated fire conditions
@@ -266,7 +260,7 @@ def firedet_bands_metadata(bbox_list: list, microarea_id: str, macroarea_id: str
     min_long, min_lat, max_long, max_lat = bbox_list
     sampled_pixels = []
 
-    location = location_manager.get_locations(
+    location, n_cols, n_rows = location_manager.get_locations(
         microarea_id, 
         macroarea_id,
         min_long, 
@@ -289,7 +283,7 @@ def firedet_bands_metadata(bbox_list: list, microarea_id: str, macroarea_id: str
         "satellite_data": sampled_pixels
     }
 
-    return metadata
+    return metadata, n_cols, n_rows
 
 
 def serialize_image_payload(image_bytes: bytes, metadata: Dict, macroarea_id:str, microarea_id:str) -> str:
