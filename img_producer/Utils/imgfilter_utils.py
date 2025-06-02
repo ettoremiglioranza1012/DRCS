@@ -126,7 +126,7 @@ def filter_image(img: np.ndarray) -> np.ndarray:
     fire_mask = generate_fire_mask(
         (h, w),
         region_top_left=(500, 1100),
-        region_size=600,
+        region_size=800,
         threshold=0.7,
         seed=42
     )
