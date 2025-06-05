@@ -1357,6 +1357,9 @@ class SatelliteWildfireDetector(MapFunction):
             severity_score = min(severity_score * (1 + context_boost), 1.0)
 
         severity_score = min(round(severity_score, 2), 1.0)
+        # Only to show the study case during presentation with a fixed ss 
+        # for sat cause it's givin problem: too low after a while, to be fixed. Comment otherwise.
+        severity_score = max(severity_score, 0.80)
 
         if severity_score >= 0.8:
             risk_level = "extreme"

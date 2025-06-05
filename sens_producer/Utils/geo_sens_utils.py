@@ -80,7 +80,7 @@ class StationsLocationManager():
                 cell_max_lat = cell_min_lat + lat_step
 
                 # Dynamic center calculation
-                center_row_start = n_rows // 3
+                center_row_start = int(n_rows * 0.17)
                 center_row_end = (2 * n_rows) // 3
                 center_col_start = n_cols // 3  
                 center_col_end = (2 * n_cols) // 3
