@@ -38,6 +38,10 @@ from kafka.admin import KafkaAdminClient
 from kafka.producer import KafkaProducer
 from kafka.errors import KafkaError
 from datetime import datetime
+import pyarrow.parquet as pq
+from io import BytesIO
+import pyarrow as pa
+import pandas as pd
 import logging
 import random
 import redis
@@ -209,45 +213,203 @@ class S3MinIOSinkBronze(S3MinIOSinkBase):
         return value
     
 
-class S3MinIOSinkSilver(S3MinIOSinkBase):
+class S3MinIOSinkSilver(MapFunction):
     """
-    MinIO sink for processed (silver) data layer.
+    MinIO sink for Parquet format using direct boto3 approach.
+    Processes IoT sensor data and saves to partitioned Parquet files.
+    """
     
-    Persists processed sensor data to the silver data layer in MinIO,
-    separating normal readings from anomalies.
-    """
-
-    def map(self, value: str) -> str:
-        """
-        Save processed sensor data to the silver layer in MinIO.
+    def __init__(self):
+        self.bucket_name = "silver"
+        # Get from environment variables or set defaults
+        self.minio_endpoint = MINIO_ENDPOINT
+        self.access_key = MINIO_ACCESS_KEY
+        self.secret_key = MINIO_SECRET_KEY
+        self.s3_client = None
         
-        Args:
-            value: JSON string containing processed sensor data
-            
-        Returns:
-            str: Original value (passed through for downstream processing)
-        """
+    def open(self, runtime_context):
+        """Initialize MinIO connection"""
         try:
-            data = json.loads(value)
-            station_id = data["station_id"]
-            timestamp_epoch_millis = data["latest_event_timestamp"]
-            # Convert epoch milliseconds to datetime
-            timestamp = datetime.fromtimestamp(timestamp_epoch_millis / 1000.0).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] 
-            
-            # Route to appropriate partition based on whether anomaly was detected
-            if "detection_flags" in data:
-                # Save record to anomalies partition
-                self.save_record_to_minio(value, station_id, timestamp, 
-                                        bucket_name='silver', partition='iot_processed/anomalies')
-            else:
-                # Save record to normal partition
-                self.save_record_to_minio(value, station_id, timestamp, 
-                                        bucket_name='silver', partition='iot_processed/normal')
-
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=f"http://{self.minio_endpoint}",
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name='us-east-1'  # MinIO doesn't care about region
+            )
+            # Test connection
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
         except Exception as e:
-            logger.error(f"Error while saving to silver layer: {str(e)}")
-
-        # Pass through for downstream processing
+            raise Exception(f"Failed to connect to MinIO: {e}")
+    
+    def process_normal_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process normal IoT data without detection flags"""
+        station_metadata = data.get("station_metadata", {})
+        position = station_metadata.get("position", {})
+        sensors = station_metadata.get("sensors", {})
+        
+        return {
+            "station_id": data.get("station_id", ""),
+            "microarea_id": position.get("microarea_id", ""),
+            "latitude": position.get("latitude", 0.0),
+            "longitude": position.get("longitude", 0.0),
+            "elevation_m": position.get("elevation_m", 0.0),
+            "station_model": station_metadata.get("station_model", ""),
+            "deployment_date": station_metadata.get("deployment_date", ""),
+            "maintenance_status": station_metadata.get("maintenance_status", ""),
+            "battery_type": station_metadata.get("battery_type", ""),
+            "temp_sens": sensors.get("temp_sens", ""),
+            "hum_sens": sensors.get("hum_sens", ""),
+            "co2_sens": sensors.get("co2_sens", ""),
+            "pm25_sens": sensors.get("pm25_sens", ""),
+            "smoke_sens": sensors.get("smoke_sens", ""),
+            "ir_sens": sensors.get("ir_sens", ""),
+            "status": data.get("status", ""),
+            "message": data.get("message", ""),
+            "response_timestamp": data.get("response_timestamp", 0),
+            "latest_event_timestamp": data.get("latest_event_timestamp", 0)
+        }
+    
+    def process_anomaly_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process IoT data with detection flags (anomalies)"""
+        station_metadata = data.get("station_metadata", {})
+        position = station_metadata.get("position", {})
+        sensors = station_metadata.get("sensors", {})
+        measurements = data.get("measurements", {})
+        detection_flags = data.get("detection_flags", {})
+        
+        return {
+            "station_id": data.get("station_id", ""),
+            "response_timestamp": data.get("response_timestamp", 0),
+            "latest_event_timestamp": data.get("latest_event_timestamp", 0),
+            
+            # Measurements
+            "temperature_c": measurements.get("temperature_c", 0.0),
+            "humidity_percent": measurements.get("humidity_percent", 0.0),
+            "co2_ppm": measurements.get("co2_ppm", 0.0),
+            "pm25_ugm3": measurements.get("pm25_ugm3", 0.0),
+            "smoke_index": measurements.get("smoke_index", 0.0),
+            "infrared_intensity": measurements.get("infrared_intensity", 0.0),
+            "battery_voltage": measurements.get("battery_voltage", 0.0),
+            
+            # Detection flags
+            "wildfire_detected": detection_flags.get("wildfire_detected", False),
+            "smoke_detected": detection_flags.get("smoke_detected", False),
+            "flame_detected_ir": detection_flags.get("flame_detected_ir", False),
+            "anomaly_detected": detection_flags.get("anomaly_detected", False),
+            "anomaly_type": detection_flags.get("anomaly_type", ""),
+            
+            # Station Metadata
+            "microarea_id": position.get("microarea_id", ""),
+            "latitude": position.get("latitude", 0.0),
+            "longitude": position.get("longitude", 0.0),
+            "elevation_m": position.get("elevation_m", 0.0),
+            "station_model": station_metadata.get("station_model", ""),
+            "deployment_date": station_metadata.get("deployment_date", ""),
+            "maintenance_status": station_metadata.get("maintenance_status", ""),
+            "battery_type": station_metadata.get("battery_type", ""),
+            
+            # Sensor metadata
+            "temp_sens": sensors.get("temp_sens", ""),
+            "hum_sens": sensors.get("hum_sens", ""),
+            "co2_sens": sensors.get("co2_sens", ""),
+            "pm25_sens": sensors.get("pm25_sens", ""),
+            "smoke_sens": sensors.get("smoke_sens", ""),
+            "ir_sens": sensors.get("ir_sens", "")
+        }
+    
+    def add_partition_columns(self, processed_data: Dict[str, Any], timestamp_millis: int) -> Tuple[Dict[str, Any], str]:
+        """Add partition columns based on timestamp"""
+        # Convert timestamp to datetime object first
+        dt = datetime.fromtimestamp(timestamp_millis / 1000.0)
+        
+        # Add partition columns
+        processed_data["year"] = dt.year
+        processed_data["month"] = dt.month
+        processed_data["day"] = dt.day
+        
+        # Create timestamp string for filename
+        timestamp_str = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Remove last 3 digits of microseconds
+        
+        return processed_data, timestamp_str
+    
+    def save_to_parquet(self, data_list: List[Dict[str, Any]], partition_path: str, station_id: str, timestamp: str) -> bool:
+        """Save processed data to partitioned Parquet file"""
+        try:
+            if not data_list:
+                return True
+                
+            # Convert to DataFrame
+            df = pd.DataFrame(data_list)
+            
+            # Create PyArrow table
+            table = pa.Table.from_pandas(df)
+            
+            # Create in-memory buffer
+            buffer = BytesIO()
+            
+            # Write to Parquet
+            pq.write_table(
+                table, 
+                buffer, 
+                compression='snappy'
+            )
+            buffer.seek(0)
+            
+            # Generate S3 key with partitioning
+            sample_row = data_list[0]
+            year = sample_row['year']
+            month = sample_row['month']
+            day = sample_row['day']
+            
+            s3_key = f"{partition_path}/year={year}/month={month:02d}/day={day:02d}/{station_id}_{timestamp}.parquet"
+            
+            # Upload to MinIO
+            self.s3_client.upload_fileobj(
+                buffer,
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={'ContentType': 'application/octet-stream'}
+            )
+            
+            # print(f"Successfully saved: {s3_key}")
+            return True
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save to Parquet: {e}")
+            return False
+    
+    def map(self, value: str) -> str:
+        """Main Flink MapFunction method - process a single JSON message"""
+        try:
+            # Parse JSON
+            data = json.loads(value)
+            station_id = data.get("station_id", "unknown")
+            timestamp_millis = data.get("latest_event_timestamp", 0)
+            
+            # Handle missing or invalid timestamp
+            if timestamp_millis <= 0:
+                timestamp_millis = int(datetime.now().timestamp() * 1000)
+            
+            # Determine processing path
+            if "detection_flags" not in data:
+                # Normal data processing
+                processed_data = self.process_data(data)
+                processed_data, timestamp = self.add_partition_columns(processed_data, timestamp_millis)
+                partition_path = "iot_processed/normal"
+                
+            else:
+                # Anomaly data processing
+                processed_data = self.process_data(data)
+                processed_data, timestamp = self.add_partition_columns(processed_data, timestamp_millis)
+                partition_path = "iot_processed/anomalies"
+            
+            # Save to Parquet
+            self.save_to_parquet([processed_data], partition_path, station_id, timestamp)
+            
+        except Exception as e:
+            print(f"ERROR: Failed to process message: {e}")
+        
         return value
     
 
