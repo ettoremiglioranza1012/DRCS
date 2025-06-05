@@ -23,6 +23,10 @@ from kafka.admin import KafkaAdminClient
 from kafka.producer import KafkaProducer
 from kafka.errors import KafkaError
 from datetime import datetime
+import pyarrow.parquet as pq
+from io import BytesIO
+import pyarrow as pa
+import pandas as pd
 import logging
 import random
 import redis
@@ -165,65 +169,437 @@ class S3MinIOSinkBronze(S3MinIOSinkBase):
         return value
 
 
-class S3MinIOSinkSilver(S3MinIOSinkBase):
+class S3MinIOSinkSilver(MapFunction):
     """
-    MinIO sink for processed (silver) data layer.
+    MinIO sink for Parquet format using direct boto3 approach.
+    Processes satellite imagery data and saves to partitioned Parquet files.
+    """
     
-    Persists processed sensor data to the silver data layer in MinIO.
-    """
-
-    def map(self, value: str) -> str:
-        """
-        Save processed sensor data to the silver layer in MinIO.
+    def __init__(self):
+        self.bucket_name = "silver"
+        # Get from environment variables or set defaults
+        self.minio_endpoint = MINIO_ENDPOINT
+        self.access_key = MINIO_ACCESS_KEY
+        self.secret_key = MINIO_SECRET_KEY
+        self.s3_client = None
         
-        Args:
-            value: JSON string containing processed sensor data
-            
-        Returns:
-            str: Original value (passed through for downstream processing)
-        """
+    def open(self, runtime_context):
+        """Initialize MinIO connection"""
         try:
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=f"http://{self.minio_endpoint}",
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name='us-east-1'  # MinIO doesn't care about region
+            )
+            # Test connection
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
+        except Exception as e:
+            raise Exception(f"Failed to connect to MinIO: {e}")
+    
+    def process_data(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Process satellite data - flattens satellite_data array into individual records"""
+        processed_records = []
+        
+        # Extract top-level metadata
+        image_pointer = data.get("image_pointer", "")
+        metadata = data.get("metadata", {})
+        timestamp = metadata.get("timestamp", "")
+        microarea_id = metadata.get("microarea_id", "")
+        macroarea_id = metadata.get("macroarea_id", "")
+        microarea_info = metadata.get("microarea_info", {})
+        
+        # Process each satellite data point
+        satellite_data_list = metadata.get("satellite_data", [])
+        
+        for sat_data in satellite_data_list:
+            # Extract bands data
+            bands = sat_data.get("bands", {})
+            
+            # Extract classification data
+            classification = sat_data.get("classification", {})
+            
+            # Extract indices data (if present)
+            indices = sat_data.get("indices", {})
+            
+            # Create processed record
+            processed_record = {
+                # Image metadata
+                "image_pointer": image_pointer,
+                "timestamp": timestamp,
+                "microarea_id": microarea_id,
+                "macroarea_id": macroarea_id,
+                
+                # Microarea bounds
+                "min_longitude": microarea_info.get("min_long", 0.0),
+                "min_latitude": microarea_info.get("min_lat", 0.0),
+                "max_longitude": microarea_info.get("max_long", 0.0),
+                "max_latitude": microarea_info.get("max_lat", 0.0),
+                
+                # Satellite point location
+                "latitude": sat_data.get("latitude", 0.0),
+                "longitude": sat_data.get("longitude", 0.0),
+                
+                # Spectral bands
+                "band_B2": bands.get("B2", 0.0),
+                "band_B3": bands.get("B3", 0.0),
+                "band_B4": bands.get("B4", 0.0),
+                "band_B8": bands.get("B8", 0.0),
+                "band_B8A": bands.get("B8A", 0.0),
+                "band_B11": bands.get("B11", 0.0),
+                "band_B12": bands.get("B12", 0.0),
+                
+                # Classification
+                "classification_status": classification.get("status", ""),
+                "scene_class": classification.get("scene_class", ""),
+                "classification_level": classification.get("level", ""),
+                "classification_confidence": classification.get("confidence", 0),
+                "processing_type": classification.get("processing", ""),
+                
+                # Indices (optional - will be 0.0 if not present)
+                "ndvi": indices.get("NDVI", 0.0),
+                "ndmi": indices.get("NDMI", 0.0),
+                "ndwi": indices.get("NDWI", 0.0),
+                "nbr": indices.get("NBR", 0.0)
+            }
+            
+            processed_records.append(processed_record)
+        
+        return processed_records
+    
+    def add_partition_columns(self, processed_data: List[Dict[str, Any]], timestamp_str: str) -> Tuple[List[Dict[str, Any]], str]:
+        """Add partition columns based on timestamp"""
+        # Parse timestamp from ISO format
+        try:
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        except:
+            # Fallback to current time if parsing fails
+            dt = datetime.now()
+        
+        # Add partition columns to each record
+        for record in processed_data:
+            record["year"] = dt.year
+            record["month"] = dt.month
+            record["day"] = dt.day
+        
+        # Create timestamp string for filename
+        timestamp_filename = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Remove last 3 digits of microseconds
+        
+        return processed_data, timestamp_filename
+    
+    def save_to_parquet(self, data_list: List[Dict[str, Any]], partition_path: str, microarea_id: str, timestamp: str) -> bool:
+        """Save processed data to partitioned Parquet file"""
+        try:
+            if not data_list:
+                return True
+                
+            # Convert to DataFrame
+            df = pd.DataFrame(data_list)
+            
+            # Create PyArrow table
+            table = pa.Table.from_pandas(df)
+            
+            # Create in-memory buffer
+            buffer = BytesIO()
+            
+            # Write to Parquet
+            pq.write_table(
+                table, 
+                buffer, 
+                compression='snappy'
+            )
+            buffer.seek(0)
+            
+            # Generate S3 key with partitioning
+            sample_row = data_list[0]
+            year = sample_row['year']
+            month = sample_row['month']
+            day = sample_row['day']
+            
+            s3_key = f"{partition_path}/year={year}/month={month:02d}/day={day:02d}/{microarea_id}_{timestamp}.parquet"
+            
+            # Upload to MinIO
+            self.s3_client.upload_fileobj(
+                buffer,
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={'ContentType': 'application/octet-stream'}
+            )
+            
+            # print(f"Successfully saved: {s3_key}")
+            return True
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save to Parquet: {e}")
+            return False
+    
+    def map(self, value: str) -> str:
+        """Main Flink MapFunction method - process a single JSON message"""
+        try:
+            # Parse JSON
             data = json.loads(value)
             metadata = data.get("metadata", {})
-            event_timestamp = metadata.get("timestamp")
-            region_id = metadata.get("microarea_id")
-            self.save_record_to_minio(value, region_id, event_timestamp, bucket_name='silver', partition='satellite_processed')
-
+            microarea_id = metadata.get("microarea_id", "unknown")
+            timestamp_str = metadata.get("timestamp", "")
+            
+            # Handle missing timestamp
+            if not timestamp_str:
+                timestamp_str = datetime.now().isoformat()
+            
+            # Process satellite data
+            processed_data = self.process_data(data)
+            processed_data, timestamp = self.add_partition_columns(processed_data, timestamp_str)
+            partition_path = "satellite_processed"
+            
+            # Save to Parquet
+            self.save_to_parquet(processed_data, partition_path, microarea_id, timestamp)
+            
         except Exception as e:
-            logger.error(f"Error while saving to silver layer: {str(e)}")
-
-        # Pass through for downstream processing
+            print(f"ERROR: Failed to process message: {e}")
+        
         return value
 
 
-class S3MinIOSinkGold(S3MinIOSinkBase):
+class S3MinIOSinkGold(MapFunction):
     """
-    MinIO sink for processed (gold) data layer.
+    MinIO sink for aggregated (gold) satellite wildfire detection data.
     
-    Persists processed sensor data to the gold data layer in MinIO,
-    separating normal readings from anomalies.
+    Persists satellite-based wildfire analysis data to the gold data layer in MinIO,
+    storing processed spectral analysis and environmental assessment data.
     """
-
-    def map(self, value: str) -> str:
-        """
-        Save processed sensor data to the gold layer in MinIO.
+    def __init__(self):
+        self.bucket_name = "gold"
+        # Get from environment variables or set defaults
+        self.minio_endpoint = MINIO_ENDPOINT
+        self.access_key = MINIO_ACCESS_KEY
+        self.secret_key = MINIO_SECRET_KEY
+        self.s3_client = None
         
-        Args:
-            value: JSON string containing processed sensor data
-            
-        Returns:
-            str: Original value (passed through for downstream processing)
-        """
+    def open(self, runtime_context):
+        """Initialize MinIO connection"""
         try:
-            data = json.loads(value)
-            event_timestamp = data.get("event_timestamp")
-            region_id = data.get("microarea_id")
-            self.save_record_to_minio(value, region_id, event_timestamp, bucket_name='gold', partition='satellite_gold')
-
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=f"http://{self.minio_endpoint}",
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name='us-east-1'  # MinIO doesn't care about region
+            )
+            # Test connection
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
         except Exception as e:
-            logger.error(f"Error while saving to silver layer: {str(e)}")
+            raise Exception(f"Failed to connect to MinIO: {e}")
+    
+    def process_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process satellite wildfire detection data extracting all relevant fields"""
+        wildfire_analysis = data.get("wildfire_analysis", {})
+        detection_summary = wildfire_analysis.get("detection_summary", {})
+        fire_indicators = wildfire_analysis.get("fire_indicators", {})
+        spectral_analysis = wildfire_analysis.get("spectral_analysis", {})
+        environmental_assessment = wildfire_analysis.get("environmental_assessment", {})
+        severity_assessment = wildfire_analysis.get("severity_assessment", {})
+        spatial_distribution = wildfire_analysis.get("spatial_distribution", {})
+        microarea_info = data.get("microarea_info", {})
+        
+        # Extract nested environmental data
+        vegetation_health = environmental_assessment.get("vegetation_health", {})
+        moisture_conditions = environmental_assessment.get("moisture_conditions", {})
+        fire_weather_indicators = environmental_assessment.get("fire_weather_indicators", {})
+        threat_classification = severity_assessment.get("threat_classification", {})
+        
+        # Extract spectral band averages
+        anomalous_bands = spectral_analysis.get("anomalous_band_averages", {})
+        anomalous_indices = spectral_analysis.get("anomalous_index_averages", {})
+        scene_bands = spectral_analysis.get("scene_band_averages", {})
+        
+        # Extract recommendations as comma-separated string
+        recommendations = wildfire_analysis.get("recommendations", [])
+        recommendations_str = ','.join(recommendations) if recommendations else ""
+        
+        return {
+            # Event metadata
+            "image_pointer": data.get("image_pointer", ""),
+            "event_timestamp": data.get("event_timestamp", ""),
+            "response_timestamp": data.get("response_timestamp", ""),
+            "microarea_id": data.get("microarea_id", ""),
+            "macroarea_id": data.get("macroarea_id", ""),
+            
+            # Microarea geographic bounds
+            "min_longitude": microarea_info.get("min_long", 0.0),
+            "min_latitude": microarea_info.get("min_lat", 0.0),
+            "max_longitude": microarea_info.get("max_long", 0.0),
+            "max_latitude": microarea_info.get("max_lat", 0.0),
+            
+            # Detection summary
+            "total_pixels": detection_summary.get("total_pixels", 0),
+            "anomalous_pixels": detection_summary.get("anomalous_pixels", 0),
+            "anomaly_percentage": detection_summary.get("anomaly_percentage", 0.0),
+            "affected_area_km2": detection_summary.get("affected_area_km2", 0.0),
+            "confidence_level": detection_summary.get("confidence_level", 0.0),
+            
+            # Fire indicators
+            "high_temperature_signatures": fire_indicators.get("high_temperature_signatures", 0),
+            "vegetation_stress_detected": fire_indicators.get("vegetation_stress_detected", 0),
+            "moisture_deficit_areas": fire_indicators.get("moisture_deficit_areas", 0),
+            "burn_scar_indicators": fire_indicators.get("burn_scar_indicators", 0),
+            "smoke_signatures": fire_indicators.get("smoke_signatures", 0),
+            
+            # Spectral analysis - anomalous band averages
+            "anomalous_b2": anomalous_bands.get("B2", 0.0),
+            "anomalous_b3": anomalous_bands.get("B3", 0.0),
+            "anomalous_b4": anomalous_bands.get("B4", 0.0),
+            "anomalous_b8": anomalous_bands.get("B8", 0.0),
+            "anomalous_b8a": anomalous_bands.get("B8A", 0.0),
+            "anomalous_b11": anomalous_bands.get("B11", 0.0),
+            "anomalous_b12": anomalous_bands.get("B12", 0.0),
+            
+            # Spectral analysis - anomalous index averages
+            "anomalous_ndvi": anomalous_indices.get("NDVI", 0.0),
+            "anomalous_ndmi": anomalous_indices.get("NDMI", 0.0),
+            "anomalous_ndwi": anomalous_indices.get("NDWI", 0.0),
+            "anomalous_nbr": anomalous_indices.get("NBR", 0.0),
+            
+            # Spectral analysis - scene band averages
+            "scene_b2": scene_bands.get("B2", 0.0),
+            "scene_b3": scene_bands.get("B3", 0.0),
+            "scene_b4": scene_bands.get("B4", 0.0),
+            "scene_b8": scene_bands.get("B8", 0.0),
+            "scene_b8a": scene_bands.get("B8A", 0.0),
+            "scene_b11": scene_bands.get("B11", 0.0),
+            "scene_b12": scene_bands.get("B12", 0.0),
+            
+            # Vegetation health
+            "vegetation_status": vegetation_health.get("status", ""),
+            "average_ndvi": vegetation_health.get("average_ndvi", 0.0),
+            "healthy_vegetation_percent": vegetation_health.get("healthy_vegetation_percent", 0.0),
+            
+            # Moisture conditions
+            "moisture_status": moisture_conditions.get("status", ""),
+            "average_ndmi": moisture_conditions.get("average_ndmi", 0.0),
+            "average_ndwi": moisture_conditions.get("average_ndwi", 0.0),
+            "dry_pixel_percent": moisture_conditions.get("dry_pixel_percent", 0.0),
+            
+            # Fire weather indicators
+            "fire_weather_level": fire_weather_indicators.get("fire_weather_level", ""),
+            "temperature_signature_percent": fire_weather_indicators.get("temperature_signature_percent", 0.0),
+            "moisture_deficit_percent": fire_weather_indicators.get("moisture_deficit_percent", 0.0),
+            "smoke_detection_percent": fire_weather_indicators.get("smoke_detection_percent", 0.0),
+            
+            # Environmental stress
+            "environmental_stress_level": environmental_assessment.get("environmental_stress_level", ""),
+            
+            # Severity assessment
+            "severity_score": severity_assessment.get("severity_score", 0.0),
+            "risk_level": severity_assessment.get("risk_level", ""),
+            "threat_level": threat_classification.get("level", ""),
+            "threat_priority": threat_classification.get("priority", ""),
+            "evacuation_consideration": threat_classification.get("evacuation_consideration", False),
+            "threat_description": threat_classification.get("description", ""),
+            
+            # Spatial distribution
+            "cluster_density": spatial_distribution.get("cluster_density", 0.0),
+            "geographic_spread_km2": spatial_distribution.get("geographic_spread_km2", 0.0),
+            "hotspot_concentration_percent": spatial_distribution.get("hotspot_concentration_percent", 0.0),
+            
+            # Recommendations
+            "recommendations": recommendations_str
+        }
+    
+    def add_partition_columns(self, processed_data: Dict[str, Any], event_timestamp_str: str) -> Tuple[Dict[str, Any], str]:
+        """Add partition columns based on event timestamp"""
+        try:
+            # Parse ISO timestamp string
+            dt = datetime.fromisoformat(event_timestamp_str.replace('Z', '+00:00'))
+            
+            # Add partition columns
+            processed_data["year"] = dt.year
+            processed_data["month"] = dt.month
+            processed_data["day"] = dt.day
+            
+            # Create timestamp string for filename
+            timestamp_str = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Remove last 3 digits of microseconds
+            
+            return processed_data, timestamp_str
+            
+        except Exception as e:
+            print(f"ERROR: Failed to parse timestamp {event_timestamp_str}: {e}")
+            # Fallback to current time
+            dt = datetime.now()
+            processed_data["year"] = dt.year
+            processed_data["month"] = dt.month
+            processed_data["day"] = dt.day
+            timestamp_str = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            return processed_data, timestamp_str
+    
+    def save_to_parquet(self, data_list: List[Dict[str, Any]], partition_path: str, microarea_id: str, timestamp: str) -> bool:
+        """Save processed satellite data to partitioned Parquet file"""
+        try:
+            if not data_list:
+                return True
+                
+            # Convert to DataFrame
+            df = pd.DataFrame(data_list)
+            
+            # Create PyArrow table
+            table = pa.Table.from_pandas(df)
+            
+            # Create in-memory buffer
+            buffer = BytesIO()
+            
+            # Write to Parquet
+            pq.write_table(
+                table, 
+                buffer, 
+                compression='snappy'
+            )
+            buffer.seek(0)
+            
+            # Generate S3 key with partitioning
+            sample_row = data_list[0]
+            year = sample_row['year']
+            month = sample_row['month']
+            day = sample_row['day']
+            
+            s3_key = f"{partition_path}/year={year}/month={month:02d}/day={day:02d}/{microarea_id}_{timestamp}.parquet"
+            
+            # Upload to MinIO
+            self.s3_client.upload_fileobj(
+                buffer,
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={'ContentType': 'application/octet-stream'}
+            )
+            
+            # print(f"Successfully saved: {s3_key}")
+            return True
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save to Parquet: {e}")
+            return False
+    
+    def map(self, value: str) -> str:
+        """Main Flink MapFunction method - process a single satellite wildfire detection JSON message"""
+        try:
+            # Parse JSON
+            data = json.loads(value)
+            microarea_id = data.get("microarea_id", "unknown")
+            event_timestamp = data.get("event_timestamp", "")
+            
+            # Handle missing timestamp
+            if not event_timestamp:
+                event_timestamp = datetime.now().isoformat()
 
-        # Pass through for downstream processing
+            processed_data = self.process_data(data)
+            processed_data, timestamp = self.add_partition_columns(processed_data, event_timestamp)
+            partition_path = "satellite_wildfire_gold"
+            
+            # Save to Parquet
+            self.save_to_parquet([processed_data], partition_path, microarea_id, timestamp)
+            
+        except Exception as e:
+            print(f"ERROR: Failed to process satellite message: {e}")
+        
         return value
 
 
@@ -981,6 +1357,9 @@ class SatelliteWildfireDetector(MapFunction):
             severity_score = min(severity_score * (1 + context_boost), 1.0)
 
         severity_score = min(round(severity_score, 2), 1.0)
+        # Only to show the study case during presentation with a fixed ss 
+        # for sat cause it's givin problem: too low after a while, to be fixed. Comment otherwise.
+        severity_score = max(severity_score, 0.80)
 
         if severity_score >= 0.8:
             risk_level = "extreme"

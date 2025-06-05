@@ -40,7 +40,7 @@ def initialize_session_state():
 def setup_page_config():
     """Configure Streamlit page settings"""
     st.set_page_config(
-        page_title="Disaster Response Dashboard",
+        page_title="DRCS Dashboard",
         layout="wide"
     )
 
@@ -78,7 +78,7 @@ def update_data_streams():
 
 def render_main_header():
     """Render the main dashboard header"""
-    st.title(f"Disaster Response Dashboard")
+    st.title(f"DRCS Dashboard")
 
 
 def render_main_tabs():

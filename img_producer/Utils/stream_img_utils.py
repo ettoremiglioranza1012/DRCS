@@ -131,6 +131,7 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
     print("\n")
     logger.info(f"Streaming data for macroarea_A{macroarea_i}...\n")
     macroarea_id = f"A{macroarea_i}"
+    iteration = 0
 
     while stream:
         try:
@@ -172,7 +173,11 @@ def stream_macro_imgs(macroarea_i:int, microarea_i:int) -> None:
             logger.info("Image np.ndarray shape: %s", true_color_imgs[0].shape)
             logger.info("Processing image...\n")
             t_proc = time.perf_counter()
-            img_payload_str = process_image(true_color_imgs, macroarea_id, microarea_id, microarea_bbox)
+            if iteration < 3:
+                iteration += 1    
+            else:
+                iteration = 0
+            img_payload_str = process_image(true_color_imgs, macroarea_id, microarea_id, microarea_bbox, iteration)
             if img_payload_str is None:
                 logger.warning("Image processing failed — skipping current iteration.")
                 continue  

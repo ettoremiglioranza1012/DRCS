@@ -157,7 +157,7 @@ def fetch_micro_bbox_from_db(macro_i: int, micro_i) -> tuple | None:
     return bbox, microarea_id
 
 
-def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bbox: list[float, float, float, float]) -> str:
+def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bbox: list[float, float, float, float], iteration: int) -> str:
     """
     Processes a satellite image by applying filtering, compression, and metadata serialization.
 
@@ -192,7 +192,7 @@ def process_image(requested_data: list, macroarea_id: str, microarea_id: str, bb
     
     try:
         # 2. Filter the image
-        filtered_img = filter_image(image)
+        filtered_img = filter_image(image, iteration=iteration)
     except Exception as e:
         logger.error(f"[ERROR] Failed to filter image: {e}")
         return None

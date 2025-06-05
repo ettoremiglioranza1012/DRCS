@@ -13,12 +13,16 @@ from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.time import Duration
 from pyflink.common import Time, Types
 
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Tuple, Union
 from data_templates import SIGNAL_CATEGORIES
 from kafka.admin import KafkaAdminClient
 from kafka.producer import KafkaProducer
 from kafka.errors import KafkaError
 from datetime import datetime
+import pyarrow.parquet as pq
+from io import BytesIO
+import pyarrow as pa
+import pandas as pd
 import requests
 import logging
 import boto3
@@ -195,33 +199,147 @@ class S3MinIOSinkBronze(S3MinIOSinkBase):
         return value
 
 
-class S3MinIOSinkGold(S3MinIOSinkBase):
+class S3MinIOSinkGold(MapFunction):
     """
-    MinIO sink for processed (gold) data layer.
+    MinIO sink for processed (gold) social emergency messages data.
     
     Persists classified and filtered social messages to the gold data layer in MinIO,
     organizing them by their category for easier dashboard consumption.
     """
-
-    def map(self, value: str) -> str:
-        """
-        Save filtered data to the gold layer in MinIO, organized by category.
+    def __init__(self):
+        self.bucket_name = "gold"
+        # Get from environment variables or set defaults
+        self.minio_endpoint = MINIO_ENDPOINT
+        self.access_key = MINIO_ACCESS_KEY
+        self.secret_key = MINIO_SECRET_KEY
+        self.s3_client = None
         
-        Args:
-            value: JSON string containing filtered and classified data
-            
-        Returns:
-            str: Original value (passed through for downstream processing)
-        """
+    def open(self, runtime_context):
+        """Initialize MinIO connection"""
         try:
-            data = json.loads(value)
-            unique_msg_id = data["unique_msg_id"]
-            label = data["category"]
-            timestamp = data["timestamp"]
-            self.save_record_to_minio(value, unique_msg_id, timestamp, bucket_name='gold', partition=f'filtered_social_msg/{label}')
-        
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=f"http://{self.minio_endpoint}",
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name='us-east-1'  # MinIO doesn't care about region
+            )
+            # Test connection
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
         except Exception as e:
-            logger.error(f"Error while saving to gold layer: {str(e)}")
+            raise Exception(f"Failed to connect to MinIO: {e}")
+    
+    def process_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process social emergency message data extracting all relevant fields"""
+        
+        return {
+            # Message content and metadata
+            "message": data.get("message", ""),
+            "category": data.get("category", ""),
+            "unique_msg_id": data.get("unique_msg_id", ""),
+            "timestamp": data.get("timestamp", ""),
+            
+            # Geographic information
+            "macroarea_id": data.get("macroarea_id", ""),
+            "microarea_id": data.get("microarea_id", ""),
+            "latitude": data.get("latitude", 0.0),
+            "longitude": data.get("longitude", 0.0)
+        }
+    
+    def add_partition_columns(self, processed_data: Dict[str, Any], timestamp_str: str) -> Tuple[Dict[str, Any], str]:
+        """Add partition columns based on timestamp"""
+        try:
+            # Parse ISO timestamp string
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            
+            # Add partition columns
+            processed_data["year"] = dt.year
+            processed_data["month"] = dt.month
+            processed_data["day"] = dt.day
+            
+            # Create timestamp string for filename
+            timestamp_str = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Remove last 3 digits of microseconds
+            
+            return processed_data, timestamp_str
+            
+        except Exception as e:
+            print(f"ERROR: Failed to parse timestamp {timestamp_str}: {e}")
+            # Fallback to current time
+            dt = datetime.now()
+            processed_data["year"] = dt.year
+            processed_data["month"] = dt.month
+            processed_data["day"] = dt.day
+            timestamp_str = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            return processed_data, timestamp_str
+    
+    def save_to_parquet(self, data_list: List[Dict[str, Any]], partition_path: str, unique_msg_id: str, timestamp: str) -> bool:
+        """Save processed social message data to partitioned Parquet file"""
+        try:
+            if not data_list:
+                return True
+                
+            # Convert to DataFrame
+            df = pd.DataFrame(data_list)
+            
+            # Create PyArrow table
+            table = pa.Table.from_pandas(df)
+            
+            # Create in-memory buffer
+            buffer = BytesIO()
+            
+            # Write to Parquet
+            pq.write_table(
+                table, 
+                buffer, 
+                compression='snappy'
+            )
+            buffer.seek(0)
+            
+            # Generate S3 key with partitioning
+            sample_row = data_list[0]
+            year = sample_row['year']
+            month = sample_row['month']
+            day = sample_row['day']
+            category = sample_row['category']
+            
+            s3_key = f"{partition_path}/{category}/year={year}/month={month:02d}/day={day:02d}/{unique_msg_id}_{timestamp}.parquet"
+            
+            # Upload to MinIO
+            self.s3_client.upload_fileobj(
+                buffer,
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={'ContentType': 'application/octet-stream'}
+            )
+            
+            # print(f"Successfully saved: {s3_key}")
+            return True
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save to Parquet: {e}")
+            return False
+    
+    def map(self, value: str) -> str:
+        """Main Flink MapFunction method - process a single social emergency message JSON"""
+        try:
+            # Parse JSON
+            data = json.loads(value)
+            unique_msg_id = data.get("unique_msg_id", "unknown")
+            timestamp = data.get("timestamp", "")
+            
+            # Handle missing timestamp
+            if not timestamp:
+                timestamp = datetime.now().isoformat()
+
+            processed_data = self.process_data(data)
+            processed_data, timestamp_str = self.add_partition_columns(processed_data, timestamp)
+            partition_path = "filtered_social_msg"
+            
+            # Save to Parquet
+            self.save_to_parquet([processed_data], partition_path, unique_msg_id, timestamp_str)
+            
+        except Exception as e:
+            print(f"ERROR: Failed to process social message: {e}")
         
         return value
 

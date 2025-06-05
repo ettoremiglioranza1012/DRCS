@@ -97,7 +97,7 @@ def apply_fire_effect_with_mask(img: np.ndarray, fire_mask: np.ndarray, red_boos
     return img_out
 
 
-def filter_image(img: np.ndarray) -> np.ndarray:
+def filter_image(img: np.ndarray, iteration: int) -> np.ndarray:
     """
     Applies a simulated fire filter to an RGB image.
 
@@ -123,10 +123,13 @@ def filter_image(img: np.ndarray) -> np.ndarray:
 
     # Generate a fire mask for a predefined region
     t1 = time.perf_counter()
+    base_size = 950
+    size_increment = 50
+    current_size = base_size + (iteration * size_increment)
     fire_mask = generate_fire_mask(
         (h, w),
         region_top_left=(500, 1100),
-        region_size=800,
+        region_size=current_size,
         threshold=0.7,
         seed=42
     )
