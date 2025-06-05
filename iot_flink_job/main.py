@@ -394,13 +394,13 @@ class S3MinIOSinkSilver(MapFunction):
             # Determine processing path
             if "detection_flags" not in data:
                 # Normal data processing
-                processed_data = self.process_data(data)
+                processed_data = self.process_normal_data(data)
                 processed_data, timestamp = self.add_partition_columns(processed_data, timestamp_millis)
                 partition_path = "iot_processed/normal"
                 
             else:
                 # Anomaly data processing
-                processed_data = self.process_data(data)
+                processed_data = self.process_anomaly_data(data)
                 processed_data, timestamp = self.add_partition_columns(processed_data, timestamp_millis)
                 partition_path = "iot_processed/anomalies"
             
@@ -413,44 +413,222 @@ class S3MinIOSinkSilver(MapFunction):
         return value
     
 
-class S3MinIOSinkGold(S3MinIOSinkBase):
+class S3MinIOSinkGold(MapFunction):
     """
     MinIO sink for aggregated (gold) data layer.
     
     Persists analytics-ready data to the gold data layer in MinIO,
     separating normal readings from wildfire events.
     """
+    def __init__(self):
+        self.bucket_name = "gold"
+        # Get from environment variables or set defaults
+        self.minio_endpoint = MINIO_ENDPOINT
+        self.access_key = MINIO_ACCESS_KEY
+        self.secret_key = MINIO_SECRET_KEY
+        self.s3_client = None
+        
+    def open(self, runtime_context):
+        """Initialize MinIO connection"""
+        try:
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=f"http://{self.minio_endpoint}",
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name='us-east-1'  # MinIO doesn't care about region
+            )
+            # Test connection
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
+        except Exception as e:
+            raise Exception(f"Failed to connect to MinIO: {e}")
+    
+    def process_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process event data extracting all fields before stations array"""
+        aggregated_detection = data.get("aggregated_detection", {})
+        environmental_context = data.get("environmental_context", {})
+        weather_conditions = environmental_context.get("weather_conditions", {})
+        terrain_info = environmental_context.get("terrain_info", {})
+        system_response = data.get("system_response", {})
+        at_risk_assets = system_response.get("at_risk_assets", {})
+        
+        # Extract population centers
+        population_centers = at_risk_assets.get("population_centers", [])
+        pop_center = population_centers[0] if population_centers else {}
+        
+        # Extract critical infrastructure
+        critical_infrastructure = at_risk_assets.get("critical_infrastructure", [])
+        power_infra = next((infra for infra in critical_infrastructure if infra.get("type") == "power_substation"), {})
+        water_infra = next((infra for infra in critical_infrastructure if infra.get("type") == "water_reservoir"), {})
+        
+        # Extract recommended actions
+        recommended_actions = system_response.get("recommended_actions", [])
+        fire_action = next((action for action in recommended_actions if action.get("action") == "deploy_fire_units"), {})
+        evac_action = next((action for action in recommended_actions if action.get("action") == "evacuate_area"), {})
+        
+        # Extract notifications
+        notifications = system_response.get("sent_notifications_to", [])
+        fire_dept_notif = next((notif for notif in notifications if notif.get("agency") == "local_fire_department"), {})
+        emergency_mgmt_notif = next((notif for notif in notifications if notif.get("agency") == "emergency_management"), {})
+        
+        return {
+            # Event metadata
+            "event_id": data.get("event_id", ""),
+            "region_id": data.get("region_id", ""),
+            "response_timestamp": data.get("response_timestamp", 0),
+            "latest_event_timestamp": data.get("latest_event_timestamp", 0),
+            "event_type": data.get("event_type", ""),
+            "detection_source": data.get("detection_source", ""),
+            
+            # Aggregated detection
+            "wildfire_detected": aggregated_detection.get("wildfire_detected", False),
+            "detection_confidence": aggregated_detection.get("detection_confidence", 0.0),
+            "severity_score": aggregated_detection.get("severity_score", 0.0),
+            "anomaly_detected": aggregated_detection.get("anomaly_detected", False),
+            "anomaly_type": aggregated_detection.get("anomaly_type", ""),
+            "air_quality_index": aggregated_detection.get("air_quality_index", 0.0),
+            "air_quality_status": aggregated_detection.get("air_quality_status", ""),
+            "estimated_ignition_time": aggregated_detection.get("estimated_ignition_time", ""),
+            
+            # Fire behavior
+            "fire_spread_rate": aggregated_detection.get("fire_behavior", {}).get("spread_rate", ""),
+            "fire_direction": aggregated_detection.get("fire_behavior", {}).get("direction", ""),
+            "fire_speed_mph": aggregated_detection.get("fire_behavior", {}).get("estimated_speed_mph", 0.0),
+            
+            # Weather conditions
+            "weather_temperature": weather_conditions.get("temperature", 0.0),
+            "weather_humidity": weather_conditions.get("humidity", 0.0),
+            "wind_speed": weather_conditions.get("wind_speed", 0.0),
+            "wind_direction": weather_conditions.get("wind_direction", 0.0),
+            "precipitation_chance": weather_conditions.get("precipitation_chance", 0.0),
+            
+            # Terrain info
+            "vegetation_type": terrain_info.get("vegetation_type", ""),
+            "vegetation_density": terrain_info.get("vegetation_density", ""),
+            "slope": terrain_info.get("slope", ""),
+            "aspect": terrain_info.get("aspect", ""),
+            
+            # System response
+            "event_triggered": system_response.get("event_triggered", ""),
+            "alert_level": system_response.get("alert_level", ""),
+            "action_taken": system_response.get("action_taken", ""),
+            "automated": system_response.get("automated", False),
+            
+            # At-risk population center (first one)
+            "pop_center_name": pop_center.get("name", ""),
+            "pop_center_distance_m": pop_center.get("distance_meters", 0),
+            "pop_center_population": pop_center.get("population", 0),
+            "pop_center_evac_priority": pop_center.get("evacuation_priority", ""),
+            
+            # Critical infrastructure - power
+            "power_infra_name": power_infra.get("name", ""),
+            "power_infra_distance_m": power_infra.get("distance_meters", 0),
+            "power_infra_priority": power_infra.get("priority", ""),
+            
+            # Critical infrastructure - water
+            "water_infra_name": water_infra.get("name", ""),
+            "water_infra_distance_m": water_infra.get("distance_meters", 0),
+            "water_infra_priority": water_infra.get("priority", ""),
+            
+            # Fire deployment action
+            "fire_deploy_priority": fire_action.get("priority", ""),
+            "fire_recommended_resources": ','.join(fire_action.get("recommended_resources", [])),
+            
+            # Evacuation action
+            "evac_priority": evac_action.get("priority", ""),
+            "evac_radius_m": evac_action.get("radius_meters", 0),
+            "evac_direction": evac_action.get("evacuation_direction", ""),
+            
+            # Notifications
+            "fire_dept_delivery_status": fire_dept_notif.get("delivery_status", ""),
+            "fire_dept_notif_timestamp": fire_dept_notif.get("notification_timestamp", ""),
+            "emergency_mgmt_delivery_status": emergency_mgmt_notif.get("delivery_status", ""),
+            "emergency_mgmt_notif_timestamp": emergency_mgmt_notif.get("notification_timestamp", "")
+        }
+    
+    def add_partition_columns(self, processed_data: Dict[str, Any], timestamp_millis: int) -> Tuple[Dict[str, Any], str]:
+        """Add partition columns based on timestamp"""
+        # Convert timestamp to datetime object first
+        dt = datetime.fromtimestamp(timestamp_millis / 1000.0)
+        
+        # Add partition columns
+        processed_data["year"] = dt.year
+        processed_data["month"] = dt.month
+        processed_data["day"] = dt.day
+        
+        # Create timestamp string for filename
+        timestamp_str = dt.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Remove last 3 digits of microseconds
+        
+        return processed_data, timestamp_str
+    
+    def save_to_parquet(self, data_list: List[Dict[str, Any]], partition_path: str, station_id: str, timestamp: str) -> bool:
+        """Save processed data to partitioned Parquet file"""
+        try:
+            if not data_list:
+                return True
+                
+            # Convert to DataFrame
+            df = pd.DataFrame(data_list)
+            
+            # Create PyArrow table
+            table = pa.Table.from_pandas(df)
+            
+            # Create in-memory buffer
+            buffer = BytesIO()
+            
+            # Write to Parquet
+            pq.write_table(
+                table, 
+                buffer, 
+                compression='snappy'
+            )
+            buffer.seek(0)
+            
+            # Generate S3 key with partitioning
+            sample_row = data_list[0]
+            year = sample_row['year']
+            month = sample_row['month']
+            day = sample_row['day']
+            
+            s3_key = f"{partition_path}/year={year}/month={month:02d}/day={day:02d}/{station_id}_{timestamp}.parquet"
+            
+            # Upload to MinIO
+            self.s3_client.upload_fileobj(
+                buffer,
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={'ContentType': 'application/octet-stream'}
+            )
+            
+            # print(f"Successfully saved: {s3_key}")
+            return True
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save to Parquet: {e}")
+            return False
     
     def map(self, value: str) -> str:
-        """
-        Save aggregated data to the gold layer in MinIO.
-        
-        Args:
-            value: JSON string containing aggregated event data
-            
-        Returns:
-            str: Original value (passed through for downstream processing)
-        """
+        """Main Flink MapFunction method - process a single JSON message"""
         try:
+            # Parse JSON
             data = json.loads(value)
-            region_id = data["region_id"]
-            timestamp_epoch_millis = data["latest_event_timestamp"]
-            # Convert epoch milliseconds to datetime
-            timestamp = datetime.fromtimestamp(timestamp_epoch_millis / 1000.0).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            event_id = data.get("event_id", "unknown")
+            timestamp_millis = data.get("latest_event_timestamp", 0)
             
-            # Route to appropriate partition based on event type
-            if data["event_type"] == "normal":
-                self.save_record_to_minio(value, region_id, timestamp, 
-                                        bucket_name='gold', partition='iot_gold/normal')
-            elif data["event_type"] == "wildfire":
-                self.save_record_to_minio(value, region_id, timestamp, 
-                                        bucket_name='gold', partition='iot_gold/anomalies')
-            else:
-                logger.error(f"Unknown event type for region: {data['region_id']}")
+            # Handle missing or invalid timestamp
+            if timestamp_millis <= 0:
+                timestamp_millis = int(datetime.now().timestamp() * 1000)
 
+            processed_data = self.process_data(data)
+            processed_data, timestamp = self.add_partition_columns(processed_data, timestamp_millis)
+            partition_path = "iot_gold"
+            
+            # Save to Parquet
+            self.save_to_parquet([processed_data], partition_path, event_id, timestamp)
+            
         except Exception as e:
-            logger.error(f"Error while saving to gold layer: {str(e)}")
-
+            print(f"ERROR: Failed to process message: {e}")
+        
         return value
 
 

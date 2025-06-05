@@ -147,6 +147,7 @@ services:
       - zookeeper
       - minio
       - redis
+      - sens_producer
     restart: on-failure
     networks:
       - drcs_net
@@ -167,6 +168,7 @@ services:
       - zookeeper
       - minio
       - redis
+      - msg_producer
     restart: on-failure
     networks:
       - drcs_net
@@ -187,6 +189,7 @@ services:
       - zookeeper
       - minio
       - redis
+      - img_producer
     restart: on-failure
     networks:
       - drcs_net
