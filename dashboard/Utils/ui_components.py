@@ -640,26 +640,81 @@ def render_iot_tab(latest_iot, redis_client):
             severity = aggregated.get("severity_score", 0)
             st.metric(label="Severity", value=f"{severity:.2f}")
 
-            st.markdown("**Sensor Measurements**")
-            measurement_types = ["Temperature C", "Humidity Percent", "Co2 Ppm", "Pm25 Ugm3", "Smoke Index"]
-            sensor_data = {m: " " for m in measurement_types}
-
+            st.markdown("*Sensor Measurements*")
+            st.markdown(
+                "<span style='color:gray; font-size:0.9em;'>Click a sensor on the map to see info</span>",
+                unsafe_allow_html=True
+            )
+            clicked_station_data = None
             if map_data and map_data.get("last_object_clicked"):
                 clicked = map_data["last_object_clicked"]
                 for station in stations:
                     pos = station["station_metadata"]["position"]
                     if abs(pos["latitude"] - clicked["lat"]) < 0.0001 and abs(pos["longitude"] - clicked["lng"]) < 0.0001:
-                        measurements = station.get("measurements", {})
-                        if measurements:
-                            for k, v in measurements.items():
-                                label = k.replace("_", " ").title()
-                                if label in sensor_data:
-                                    sensor_data[label] = v
+                        clicked_station_data = station
                         break
-
-            measurement_df = pd.DataFrame(sensor_data.items(), columns=["Measurement", "Value"])
-            measurement_df["Value"] = measurement_df["Value"].astype(str)
-            st.dataframe(measurement_df, hide_index=True, use_container_width=True)
+            
+            # Create a container with fixed height
+            sensor_container = st.container(height=300)
+            
+            with sensor_container:
+                if clicked_station_data:
+                    measurements = clicked_station_data.get("measurements")
+                    if measurements:
+                        measurement_types = [
+                            "Temperature C", 
+                            "Humidity Percent", 
+                            "Co2 Ppm", 
+                            "Pm25 Ugm3", 
+                            "Smoke Index", 
+                            "Infrared Intensity", 
+                            "Battery Voltage"
+                        ]
+                        sensor_data = {m: " " for m in measurement_types}
+                        
+                        # Create a mapping from your data keys to display labels
+                        key_mapping = {
+                            "temperature_c": "Temperature C",
+                            "humidity_percent": "Humidity Percent", 
+                            "co2_ppm": "Co2 Ppm",
+                            "pm25_ugm3": "Pm25 Ugm3",
+                            "smoke_index": "Smoke Index",
+                            "infrared_intensity": "Infrared Intensity",
+                            "battery_voltage": "Battery Voltage"
+                        }
+                        
+                        for k, v in measurements.items():
+                            if k in key_mapping:
+                                display_label = key_mapping[k]
+                                sensor_data[display_label] = v
+                                
+                        measurement_df = pd.DataFrame(sensor_data.items(), columns=["Measurement", "Value"])
+                        measurement_df["Value"] = measurement_df["Value"].astype(str)
+                        st.dataframe(
+                            measurement_df, 
+                            hide_index=True, 
+                            use_container_width=True,
+                        )
+                    else:
+                        status = clicked_station_data.get("status", "No data")
+                        message = clicked_station_data.get("message", "No message")
+                        no_fire_df = pd.DataFrame({
+                            "Field": ["Status", "Message"],
+                            "Value": [status, message]
+                        })
+                        no_fire_df["Value"] = no_fire_df["Value"].astype(str)
+                        st.dataframe(
+                            no_fire_df,
+                            hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "Field": st.column_config.TextColumn(width="small"),
+                                "Value": st.column_config.TextColumn(width="large"),
+                            }
+                        )
+                else:
+                    # When no sensor is clicked, maintain the same space
+                    st.write("")
 
             st.markdown("**Terrain Info**")
             terrain = environmental.get("terrain_info", {})
