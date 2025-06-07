@@ -11,3 +11,5 @@ env/
 # PostgreSQL data directory (if mounted)
 db_data/
 
+*.jar
+

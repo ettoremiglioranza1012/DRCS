@@ -1,11 +1,11 @@
 # Disaster Response Coordination System (DRCS)
 
 ## Overview
-The Disaster Response Coordination System is a Big Data platform designed to support real-time emergency management by integrating data from diverse sources: satellite imagery, IoT sensors, social media feeds, and official meteorological forecasts.
+The Disaster Response Coordination System is a Big Data platform designed to support real-time emergency management by integrating data from diverse sources, including satellite imagery, IoT sensor streams, social media feeds, and official meteorological data.
 
-The system leverages streaming technologies like Apache Kafka for high-velocity data ingestion and Apache Flink for real-time processing and aggregation. A predictive model anticipates fire outbreaks using historical wildfire and weather data, while the ingested data is structured into a multi-layer Data Lakehouse (bronze, silver, gold) hosted on MinIO.
+The system leverages streaming technologies such as Apache Kafka for high-velocity data ingestion and Apache Flink for real-time processing and aggregation. Machine Learning models are employed to assess risk levels and detect potential hazards based on historical patterns and live data. All ingested data is organized within a multi-layer Data Lakehouse architecture (bronze, silver, gold), stored on MinIO for scalable and efficient access.
 
-The final output powers an interactive dashboard for emergency response agencies, providing a comprehensive view of satellite-based metrics, sensor anomalies, social signals, and critical alerts—enabling rapid, coordinated decision-making during natural disasters.
+The final output powers an interactive dashboard for emergency response agencies, offering a unified view of remote sensing metrics, sensor anomalies, social signals, and actionable alerts—enabling fast and coordinated decision-making across a wide range of emergency scenarios.
 
 --- 
 
@@ -54,7 +54,8 @@ Scaling the system to monitor multiple microareas would require:
 ### Execution Summary 
 When launching the project, the study case executed will correspond to: 
    - A **hardcoded microarea** in California near **Sacramento (Woodland)**. 
-   - **Satellite imagery** fetched every minute. - **IoT sensor measurements** (e.g., temperature, humidity, air quality) generated every 5 seconds. 
+   - **Satellite imagery** fetched every minute. 
+   - **IoT sensor measurements** (e.g., temperature, humidity, air quality) generated every 5 seconds. 
    - **Simulated social media messages** ingested every second. 
    - **Early warning logic**, triggered at startup, based on historical weather data and upcoming forecasts from the Copernicus Climate Data Store. 
 
@@ -184,12 +185,23 @@ The repository is organized into several key directories and files:
    git clone https://github.com/BDT-Team3/DRCS_1.0.git
    cd DRCS_1.0
 
+Install the JARS necessary to run the Flink's job, and put them inside of their root directories.
+- Flink Kafka Connector:
+   ```bash
+   https://repo1.maven.org/maven2/org/apache/flink/flink-connector-kafka/1.17.0/flink-connector-kafka-1.17.0.jar
+   ```
+- Kafka Clients
+   ```bash
+   https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.3.2/kafka-clients-3.3.2.jar
+   ```
+
 2. **SentinelHub Configuration (REQUIRED)**:
 Before running image acquisition containers, you must **configure your SentinelHub credentials** in a `config.toml` file. This file is used by the `sentinelhub-py` library to authenticate requests:
 
 - Go in the Config folder of the image producers containers (e.g. img_producer) and make sure to replace placeholders in `config.toml` with your own `client_id` and `client_secret`.  
 - These are obtained by registering your app at:  
 👉 [https://dataspace.copernicus.eu](https://dataspace.copernicus.eu)
+- After loggin in, go to your personal area (top right widget -> sentinel hub). Go to 'User setting' and in the bottom-right area a OAuth clients section can be seen. Create your own access keys. 
 - An example of a configuration file .toml ready to use is provided inside the image producers containers.
 - For detailed help, refer to the official setup guide:  
 🔗 [sentinelhub-py configuration](https://sentinelhub-py.readthedocs.io/en/latest/configure.html)
@@ -201,7 +213,6 @@ sh_client_secret = "your-client-secret"
 sh_base_url = "https://sh.dataspace.copernicus.eu"
 sh_token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 ```
-*Note for the professors*: to run the project you can safely use the provided credentials instead of creating your own
 
 3. **Run the application**:
    ```bash

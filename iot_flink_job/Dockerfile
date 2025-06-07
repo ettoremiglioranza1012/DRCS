@@ -14,5 +14,4 @@ COPY data_templates.py /opt/data_templates.py
 COPY flink-connector-kafka-1.17.0.jar /opt/flink/lib/
 COPY kafka-clients-3.3.2.jar /opt/flink/lib/
 
-
 CMD ["python", "/opt/main.py"]
