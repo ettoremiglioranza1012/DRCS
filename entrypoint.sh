@@ -16,7 +16,7 @@ echo ""
 
 # Step 1: Run the early warning system containers in the background
 echo "[INFO] Launching early warning containers..."
-echo "[WARNING] Please be sure Docker Engine is UP and Running, otherwise all system will crush!"
+echo "[WARNING] Please be sure Docker Engine is UP and Running, otherwise the system will crush!"
 docker-compose -f docker-compose.early_warning.yml up --build -d
 
 echo "[INFO] Waiting for 'early_warning_model' container to complete analysis..."
@@ -40,11 +40,11 @@ echo ""
 
 # Step 4: Decide what to do based on the exit code
 if [ "$EXIT_CODE" -eq 1 ] || [ "$EXIT_CODE" -eq 2 ]; then
-    echo "===================================================="
+    echo "======================================================================="
     echo " FIRE RISK DETECTED"
     echo " Exit Code: $EXIT_CODE"
-    echo " Starting Main Disaster Response System..."
-    echo "===================================================="
+    echo " Starting Main Disaster Response Coordination System for monitoring..."
+    echo "======================================================================="
     echo ""
 
     docker-compose up --build
