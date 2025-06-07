@@ -93,9 +93,7 @@ DRCS_1.0/
 ├── iot_flink_job/
 │   ├── Dockerfile
 │   ├── main.py
-│   ├── data_templates.py
-│   ├── flink-connector-kafka-1.17.0.jar
-│   └── kafka-clients-3.3.2.jar
+│   └── data_templates.py
 ├── meteo_data/
 │   ├── meteo_forecast.csv
 │   └── meteo_totrain.csv
@@ -116,9 +114,7 @@ DRCS_1.0/
 ├── satellite_flink_job/
 │   ├── Dockerfile
 │   ├── main.py
-│   ├── data_templates.py
-│   ├── flink-connector-kafka-1.17.0.jar
-│   └── kafka-clients-3.3.2.jar
+│   └── data_templates.py
 ├── sens_producer/
 │   ├── Dockerfile
 │   ├── prod_sens.py
@@ -137,9 +133,7 @@ DRCS_1.0/
 ├── social_flink_job/
 │   ├── Dockerfile
 │   ├── main.py
-│   ├── data_templates.py
-│   ├── flink-connector-kafka-1.17.0.jar
-│   └── kafka-clients-3.3.2.jar
+│   └── data_templates.py
 ```
 
 The repository is organized into several key directories and files:
@@ -150,7 +144,7 @@ The repository is organized into several key directories and files:
 
 - **img_producer/, msg_producer/, sens_producer/**: These components simulate or stream real-time data (satellite images, social media messages, sensor readings) into Kafka topics. Each includes utility functions, config files, and a Dockerfile.
 
-- **iot_flink_job/, satellite_flink_job/, social_flink_job/**: Apache Flink jobs responsible for consuming, enriching, and processing IoT, satellite, and social media streams in real time. Include Kafka/Flink connector JARs.
+- **iot_flink_job/, satellite_flink_job/, social_flink_job/**: Apache Flink jobs responsible for consuming, enriching, and processing IoT, satellite, and social media streams in real time.
 
 - **meteo_data/**: Contains raw and processed meteorological datasets in CSV format used for both analytics and model training.
 
@@ -185,7 +179,8 @@ The repository is organized into several key directories and files:
    git clone https://github.com/BDT-Team3/DRCS_1.0.git
    cd DRCS_1.0
 
-Install the JARS necessary to run the Flink's job, and put them inside of their root directories.
+2. **JARs**:
+Install the JARS necessary to run the Flink's job, and put them inside their directories.
 - Flink Kafka Connector:
    ```bash
    https://repo1.maven.org/maven2/org/apache/flink/flink-connector-kafka/1.17.0/flink-connector-kafka-1.17.0.jar
@@ -195,7 +190,7 @@ Install the JARS necessary to run the Flink's job, and put them inside of their 
    https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.3.2/kafka-clients-3.3.2.jar
    ```
 
-2. **SentinelHub Configuration (REQUIRED)**:
+3. **SentinelHub Configuration (REQUIRED)**:
 Before running image acquisition containers, you must **configure your SentinelHub credentials** in a `config.toml` file. This file is used by the `sentinelhub-py` library to authenticate requests:
 
 - Go in the Config folder of the image producers containers (e.g. img_producer) and make sure to replace placeholders in `config.toml` with your own `client_id` and `client_secret`.  
@@ -214,19 +209,19 @@ sh_base_url = "https://sh.dataspace.copernicus.eu"
 sh_token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 ```
 
-3. **Run the application**:
+4. **Run the application**:
    ```bash
    bash ./entrypoint.sh
 
-4. **Wait**: 
+5. **Wait**: 
 Wait for the early warning system to execute disaster probability forecast and trigger the live-streaming disaster response and coordination system. When the building of the containers is executed and the logs start to get printed you can directly head to the next phase.
 
-5. **Access the data warehouse**: 
+6. **Access the data warehouse**: 
    Go to http://127.0.0.1:9001 and acccess with credentials:
    - ID: 'minioadmin'
    - Password: 'minioadmin'
 
-6. **Access the dashboard**:
+7. **Access the dashboard**:
    Go to http://localhost:8501 and explore the monitoring system for the microarea example
 
 ---
