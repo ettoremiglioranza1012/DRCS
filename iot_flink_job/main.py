@@ -475,7 +475,7 @@ class S3MinIOSinkGold(MapFunction):
             # Event metadata
             "event_id": data.get("event_id", ""),
             "region_id": data.get("region_id", ""),
-            "response_timestamp": int(datetime.now().timestamp() * 1000),
+            "response_timestamp": int(datetime.now().timestamp() * 1000), # Lock correcet response timestamp at the moment of sinking
             "latest_event_timestamp": data.get("latest_event_timestamp", 0),
             "event_type": data.get("event_type", ""),
             "detection_source": data.get("detection_source", ""),
@@ -1161,7 +1161,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
         gold_data = {
             "event_id": f"{microarea_id}_{response_timestamp}_{unique_id}",
             "region_id": microarea_id,
-            "response_timestamp": response_timestamp,
+            "response_timestamp": response_timestamp, # just a place holders, to be changed in the future since this won't be used and will be taken again during final sink operations
             "latest_event_timestamp": agg_event_timestamp,
             "event_type": "normal",
             "detection_source": "sensor_network",
@@ -1263,7 +1263,7 @@ class GoldAggregatorWindowFunction(ProcessWindowFunction):
         gold_data = {
             "event_id": f"{microarea_id}_{response_timestamp}_{unique_id}",
             "region_id": microarea_id,
-            "response_timestamp": response_timestamp,
+            "response_timestamp": response_timestamp, # just a place holders, to be changed in the future since this won't be used and will be taken again during final sink operations
             "latest_event_timestamp": agg_event_timestamp,
             "event_type": "wildfire",
             "detection_source": "sensor_network",

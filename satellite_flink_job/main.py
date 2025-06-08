@@ -935,7 +935,7 @@ class SatelliteWildfireDetector(MapFunction):
         if fire_metrics["anomalous_count"] == 0:
             enriched_data["image_pointer"] = data.get("image_pointer")
             enriched_data["event_timestamp"] = metadata.get("timestamp")
-            enriched_data["response_timestamp"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            enriched_data["response_timestamp"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] # just a place holders, to be changed in the future since this won't be used and will be taken again during final sink operations
             enriched_data["microarea_id"] = metadata.get("microarea_id")
             enriched_data["macroarea_id"] = metadata.get("macroarea_id")
             enriched_data["microarea_info"] = metadata.get("microarea_info")
@@ -952,7 +952,7 @@ class SatelliteWildfireDetector(MapFunction):
             # Enriched anomalies data payload
             enriched_data["image_pointer"] = data.get("image_pointer")
             enriched_data["event_timestamp"] = metadata.get("timestamp")
-            enriched_data["response_timestamp"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            enriched_data["response_timestamp"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] # just a place holders, to be changed in the future since this won't be used and will be taken again during final sink operations
             enriched_data["microarea_id"] = metadata.get("microarea_id")
             enriched_data["macroarea_id"] = metadata.get("macroarea_id")
             enriched_data["microarea_info"] = metadata.get("microarea_info")
