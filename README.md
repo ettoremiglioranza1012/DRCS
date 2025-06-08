@@ -209,9 +209,17 @@ sh_base_url = "https://sh.dataspace.copernicus.eu"
 sh_token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 ```
 
+4. **(Optional) Apple Silicon Arm64 CPU architecture**:
+If you have an M1, M2... processor Apple Silicon you need to run this command before launching the system 
+   ```bash
+   export DOCKER_DEFAULT_PLATFORM=linux/amd64
+   ```
+
 4. **Run the application**:
+Be sure the docker engine is working, then run 
    ```bash
    bash ./entrypoint.sh
+   ```
 
 5. **Wait**: 
 Wait for the early warning system to execute disaster probability forecast and trigger the live-streaming disaster response and coordination system. When the building of the containers is executed and the logs start to get printed you can directly head to the next phase.
