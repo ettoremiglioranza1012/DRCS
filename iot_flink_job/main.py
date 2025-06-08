@@ -475,7 +475,7 @@ class S3MinIOSinkGold(MapFunction):
             # Event metadata
             "event_id": data.get("event_id", ""),
             "region_id": data.get("region_id", ""),
-            "response_timestamp": data.get("response_timestamp", 0),
+            "response_timestamp": int(datetime.now().timestamp() * 1000),
             "latest_event_timestamp": data.get("latest_event_timestamp", 0),
             "event_type": data.get("event_type", ""),
             "detection_source": data.get("detection_source", ""),

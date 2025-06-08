@@ -238,6 +238,7 @@ class S3MinIOSinkGold(MapFunction):
             "category": data.get("category", ""),
             "unique_msg_id": data.get("unique_msg_id", ""),
             "timestamp": data.get("timestamp", ""),
+            "response_timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3],
             
             # Geographic information
             "macroarea_id": data.get("macroarea_id", ""),

@@ -421,7 +421,7 @@ class S3MinIOSinkGold(MapFunction):
             # Event metadata
             "image_pointer": data.get("image_pointer", ""),
             "event_timestamp": data.get("event_timestamp", ""),
-            "response_timestamp": data.get("response_timestamp", ""),
+            "response_timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3],
             "microarea_id": data.get("microarea_id", ""),
             "macroarea_id": data.get("macroarea_id", ""),
             
