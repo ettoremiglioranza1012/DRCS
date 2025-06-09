@@ -244,7 +244,7 @@ Each component of the architecture plays a distinct role: Kafka handles real-tim
 
 The complete data flow, from raw input to actionable dashboard alerts, is illustrated below:
 
-<p align="center"> <img src="./media/DataFlow.jpeg" alt="Data Flow Overview" width="600"/> </p>
+<p align="center"> <img src="./media/DataFlow.jpeg" alt="Data Flow Overview" width="900"/> </p>
 
 This architecture enables the DRCS to operate in real time, providing emergency responders with a comprehensive and dynamic view of evolving disasters, grounded in multi-source intelligence.
 
