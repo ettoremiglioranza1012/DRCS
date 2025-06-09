@@ -146,7 +146,7 @@ The repository is organized into several key directories and files:
 
 - **iot_flink_job/, satellite_flink_job/, social_flink_job/**: Apache Flink jobs responsible for consuming, enriching, and processing IoT, satellite, and social media streams in real time.
 
-- **meteo_data/**: Contains raw and processed meteorological datasets in CSV format used for both analytics and model training.
+- **meteo_data/**: Includes historical weather data with fire risk labels for model training (meteo_totrain) and forecasted data for making predictions (meteo_forecast). All files are in CSV format.
 
 - **meteo_data_loader/**: A lightweight component for loading official weather forecast data into the system. Includes a Dockerfile and requirements.
 
