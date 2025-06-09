@@ -150,7 +150,7 @@ The repository is organized into several key directories and files:
 
 - **meteo_data_loader/**: A lightweight component for loading official weather forecast data into the system. Includes a Dockerfile and requirements.
 
-- **nlp_microservice/**: Provides natural language processing capabilities for classifying and extracting signals from social media posts. Includes data templates and a lightweight Flask/FastAPI service.
+- **nlp_microservice/**: Provides natural language processing capabilities for classifying and extracting signals from social media posts using TF-IDF vectorization. Includes data templates and a lightweight Flask/FastAPI service.
 
 - **setup_minio/**: Includes scripts to initialize and configure MinIO buckets used as the storage backend for the Data Lakehouse (bronze, silver, gold layers).
 
