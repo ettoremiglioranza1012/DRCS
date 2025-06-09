@@ -238,7 +238,7 @@ Wait for the early warning system to execute disaster probability forecast and t
 
 The development of the Disaster Response Coordination System (DRCS) is driven by a modular architecture that combines streaming, analytics, storage, and alerting components. A carefully selected suite of big data technologies ensures that the system can manage high-velocity, multi-source data and deliver timely, actionable insights during disaster scenarios.
 
-<p align="center"> <img src="./media/ArchitectureDesign.jpeg" alt="System Architecture" width="600"/> </p>
+<p align="center"> <img src="./media/ArchitectureDesign.jpg" alt="System Architecture" width="600"/> </p>
 
 Each component of the architecture plays a distinct role: Kafka handles real-time data ingestion, Flink processes and enriches data streams, predictive models detect anomalies, and the Lakehouse architecture stores and structures the data across bronze, silver, and gold layers.
 
