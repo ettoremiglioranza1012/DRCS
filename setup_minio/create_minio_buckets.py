@@ -1,4 +1,25 @@
 
+"""
+Ensure Required MinIO Buckets Exist
+
+This utility script connects to a MinIO server (S3-compatible object storage) and 
+ensures that all required buckets for the satellite wildfire detection pipeline 
+are present. If any of the specified buckets are missing, it creates them.
+
+Buckets checked/created:
+    - satellite-imgs : for storing incoming raw satellite images (if used)
+    - bronze         : raw JSON data layer
+    - silver         : cleaned and structured Parquet data
+    - gold           : aggregated and enriched analytics-ready data
+
+Requirements:
+    - boto3
+    - MinIO running at endpoint http://minio:9000
+    - Access credentials (minioadmin/minioadmin by default)
+
+This script should be run once during system setup or service initialization.
+"""
+
 # Utilities
 import boto3
 

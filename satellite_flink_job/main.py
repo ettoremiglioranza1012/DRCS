@@ -1,6 +1,61 @@
 
 """
-    Comment here!
+===============================================================================
+Satellite Wildfire Detection - Real-Time Streaming Pipeline with Apache Flink
+===============================================================================
+
+Description:
+------------
+This script implements a complete Apache Flink streaming pipeline for real-time 
+satellite-based wildfire detection, severity assessment, and data lakehouse 
+persistence using Kafka, Redis, and MinIO.
+
+Key Components:
+---------------
+1. Kafka Integration:
+   - Consumes satellite imagery data as JSON messages from a Kafka topic.
+   - Publishes enriched and risk-assessed messages to a Kafka topic for downstream
+     systems (e.g., dashboards, alerting systems).
+
+2. Bronze Layer (Raw Ingestion):
+   - Stores raw, unprocessed JSON messages in MinIO using an S3-compatible client.
+   - Partitioned by date and region for optimal querying.
+
+3. Preprocessing & Enrichment:
+   - Applies early fire classification using band thresholds and vegetation indices.
+   - Enriches satellite data with geospatial metadata retrieved from Redis.
+
+4. Silver Layer (Structured Format):
+   - Flattens enriched satellite pixel data into structured records.
+   - Saves as Parquet files in MinIO, partitioned by date and region.
+
+5. Gold Layer (Analytics & Metrics):
+   - Performs advanced wildfire detection logic with spectral and environmental
+     analysis, spatial metrics, and severity scoring.
+   - Generates actionable recommendations based on fire severity and extent.
+   - Stores high-level analytical summaries in MinIO (Parquet format) and 
+     publishes results to Kafka for real-time dashboards.
+
+6. Resilience & Observability:
+   - Waits for MinIO and Kafka readiness before job starts.
+   - Retries Redis enrichment with exponential backoff if metadata is missing.
+   - Logs all major pipeline stages, warnings, and critical anomalies.
+
+Environment Configuration:
+--------------------------
+- Kafka Broker: Defined via `KAFKA_SERVERS`
+- MinIO: Uses environment variables `MINIO_ENDPOINT`, `AWS_ACCESS_KEY_ID`, 
+  and `AWS_SECRET_ACCESS_KEY`
+- Redis: Configured via `REDIS_HOST` and `REDIS_PORT`
+
+Technologies:
+-------------
+- Apache Flink (PyFlink): Stream processing engine
+- Kafka: Real-time data ingestion and alert publishing
+- Redis: Metadata lookup for enrichment
+- MinIO: S3-compatible object store for lakehouse layers
+- Boto3: AWS-compatible MinIO client
+- Pandas & PyArrow: Efficient serialization and Parquet writing
 """
 
 # Utiliies 
@@ -752,7 +807,7 @@ class IndexAndClassifyFunction(MapFunction):
 
 class EnrichFromRedis(MapFunction):
     """
-        Comment Here!
+        Using Geospatial data pre-loaded in Redis to perform fast enrichment of the message payload
     """
 
     def __init__(self, max_retries: int = 5, initial_backoff: float = 1.0, 
@@ -848,7 +903,27 @@ class EnrichFromRedis(MapFunction):
         
     def map(self, value:str)-> str:
         """
-            Comment Here!
+        Enrich incoming JSON records with microarea metadata from Redis.
+
+        This method extracts the `microarea_id` from the incoming satellite data
+        and attempts to fetch corresponding geographic metadata from a Redis key
+        formatted as `microarea:{microarea_id}`. If the metadata is found, it is
+        inserted into the `metadata["microarea_info"]` field of the JSON structure.
+
+        If the metadata is not found in Redis or an error occurs during the fetch
+        (e.g., Redis is unavailable or returns malformed data), the method inserts
+        a default placeholder structure to ensure downstream processing can proceed
+        without breaking.
+
+        This enrichment is important for downstream modules that require precise
+        bounding boxes or location data (e.g., wildfire risk mapping, severity scoring).
+
+        Args:
+            value (str): JSON-encoded string containing a satellite observation with metadata.
+
+        Returns:
+            str: A JSON-encoded string where the `metadata` field is enriched with
+                 `microarea_info` (either from Redis or default fallback).
         """
         try:
             data = json.loads(value)
