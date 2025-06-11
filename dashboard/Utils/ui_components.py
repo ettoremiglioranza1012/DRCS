@@ -1,8 +1,4 @@
 
-"""
-    UI components for the dashboard.
-"""
-
 # Utilities
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
@@ -16,8 +12,22 @@ import folium
 import json
 
 
-def render_satellite_tab(latest_sat, minio_client, img_bucket="satellite-imgs"):
-    """Render the satellite environmental data tab"""
+def render_satellite_tab(latest_sat, minio_client, img_bucket="satellite-imgs") -> None:
+    """
+    Display the satellite environmental data tab.
+
+    This function visualizes the most recent satellite-based wildfire analysis for a given microarea.
+    It displays:
+    - Event metadata and geographic information
+    - Fire indicators and environmental assessment metrics
+    - Detection summary and severity assessment
+    - Latest satellite image from MinIO
+    - Emergency response recommendations
+    - Spatial and spectral analysis results
+
+    The data is shown in organized Streamlit columns using styled tables and metrics,
+    including map-based components and retrieved satellite imagery from object storage.
+    """
     st.header("🛰️ Satellite Environmental Data")
 
     if latest_sat:
@@ -424,7 +434,19 @@ def render_satellite_tab(latest_sat, minio_client, img_bucket="satellite-imgs"):
         st.write("The system is ready to receive and display real-time satellite environmental data.")
 
 
-def render_iot_tab(latest_iot, redis_client):
+def render_iot_tab(latest_iot, redis_client) -> None:
+    """
+    Display the IoT environmental sensor data tab.
+
+    This function visualizes real-time data from field-deployed IoT stations monitoring fire-related events.
+    It shows:
+    - Event metadata and detection status
+    - Fire behavior analysis and local weather conditions
+    - A map of sensor locations and wildfire flags
+    - System recommendations and sent notifications
+    - Detailed sensor measurements upon user interaction
+    - Terrain characteristics and nearby at-risk assets (e.g. towns, infrastructure)
+    """
     if latest_iot:
         aggregated = latest_iot.get("aggregated_detection", {})
         system_response = latest_iot.get("system_response", {})
@@ -755,7 +777,22 @@ def render_iot_tab(latest_iot, redis_client):
         st.write("The system is ready to receive and display real-time IoT environmental data.")
 
 
-def render_social_tab(latests_msg, redis_client=None):
+def render_social_tab(latests_msg, redis_client=None) -> None:
+    """
+    Display the social media alert tab.
+
+    This function manages the visualization and interaction with incoming social media messages
+    classified into alert categories (e.g., emergency help, damage reports).
+
+    Features include:
+    - Category-based filtering and update/reset options
+    - Statistics with category-specific deltas
+    - A map showing geo-located messages within the microarea (with optional Redis-based bounding box)
+    - A feed of recent social messages, styled for readability
+
+    All new messages are de-duplicated and stored in session state, allowing real-time updates
+    and persistence across user interactions.
+    """
     if "map_points" not in st.session_state:
         st.session_state.map_points = []
     if "category_counts" not in st.session_state:
@@ -924,8 +961,18 @@ def render_social_tab(latests_msg, redis_client=None):
             st.info("No messages found for selected category.")
 
 
-def render_sidebar_status(social_messages, iot_data, sat_data, social_count=0, iot_count=0, sat_count=0):
-    """Render the system status sidebar"""
+def render_sidebar_status(social_messages, iot_data, sat_data, social_count=0, iot_count=0, sat_count=0) -> None:
+    """
+    Display system status and control tools in the sidebar.
+
+    This function summarizes the number of collected messages and readings from all sources,
+    shows the time of the last data update, and highlights how many new records were processed
+    in the most recent batch update.
+
+    It also provides system health feedback (operational vs. waiting) and two action buttons:
+    - Force Refresh: reruns the Streamlit app
+    - Clear All Data: clears session state buffers for all data types
+    """
     st.sidebar.header("🖥️ System Status")
     st.sidebar.write(f"📱 Social Messages: {len(social_messages)}")
     st.sidebar.write(f"🔧 IoT Readings: {len(iot_data)}")

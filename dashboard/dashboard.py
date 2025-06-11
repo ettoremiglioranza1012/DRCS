@@ -1,8 +1,18 @@
 
 
-"""
-Disaster Response Dashboard - Main Application
-Refactored version with modular architecture
+"""Streamlit application for the Disaster Response Coordination System (DRCS) Dashboard.
+
+This dashboard displays real-time environmental data from three sources:
+1. Satellite imagery (e.g., NDVI, fire detection)
+2. IoT environmental sensors (e.g., temperature, humidity, ecc...)
+3. Social media alerts related to disasters
+
+It initializes external services (MinIO, Redis) to harvest geospatial informations and real-time satellite images, 
+consumes data from Kafka topics, updates session state, and renders a multi-tab interface for monitoring incoming data.
+
+This specific instance of the dashboard is configured to display information
+only for a single microarea, selected among the many microareas that compose
+the larger macroarea or region provided by the user.
 """
 
 # Utilities
@@ -22,7 +32,7 @@ from Utils.ui_components import (
 
 
 def initialize_session_state():
-    """Initialize Streamlit session state variables"""
+    """Initialize session state variables used to store data and status flags."""
     if 'social_messages' not in st.session_state:
         st.session_state.social_messages = []
     if 'iot_data' not in st.session_state:
@@ -38,7 +48,7 @@ def initialize_session_state():
 
 
 def setup_page_config():
-    """Configure Streamlit page settings"""
+    """Configure Streamlit page layout and title."""
     st.set_page_config(
         page_title="DRCS Dashboard",
         layout="wide"
@@ -82,7 +92,7 @@ def render_main_header():
 
 
 def render_main_tabs():
-    """Render the main dashboard tabs"""
+    """Render the three main data visualization tabs: Satellite, IoT, and Social Media."""
     tab1, tab2, tab3 = st.tabs([
         "🛰️ Satellite Environmental Data",
         "🔧 IoT Environmental Sensors", 
@@ -133,7 +143,7 @@ def render_sidebar(processing_stats):
 
 
 def main():
-    """Main application function"""
+    """Main entry point of the dashboard application."""
     # Setup
     setup_page_config()
     initialize_session_state()

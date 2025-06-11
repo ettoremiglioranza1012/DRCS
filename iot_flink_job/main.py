@@ -1,25 +1,62 @@
 
 """
-Wildfire Detection System - Real-time Sensor Data Processing
+===============================================================================
+Wildfire Detection System - Real-Time IoT Sensor Data Processing Pipeline
+===============================================================================
 
-This module implements a Flink-based streaming data processing system for wildfire detection
-using IoT sensor data. It processes data through a lambda architecture with bronze, silver,
-and gold data layers.
+Description:
+------------
+This module implements a complete Apache Flink streaming pipeline for wildfire 
+detection based on real-time IoT sensor data. The system follows a medallion 
+architecture (Bronze → Silver → Gold) to incrementally store raw, enriched, 
+and aggregated data layers in MinIO, while detecting fire events and generating 
+structured alerts.
 
-The system:
-1. Ingests sensor data from Kafka
-2. Processes and filters based on threshold values
-3. Enriches data with station metadata from Redis
-4. Aggregates data by geographical regions
-5. Persists data to MinIO (S3-compatible storage) in the lambda architecture layers
-6. Generates wildfire alerts with severity scores and recommended actions
+Key Components:
+---------------
+1. Kafka Integration:
+   - Consumes real-time IoT sensor measurements (in JSON format) from a Kafka topic.
+   - Publishes detected wildfire events and alerts to a Kafka topic (`gold_iot`) 
+     for downstream systems (e.g., dashboards, alert engines).
 
-Dependencies:
-    - Apache Flink (PyFlink)
-    - Redis
-    - MinIO
-    - Kafka
-    - boto3
+2. Event-Time & Watermarking:
+   - Assigns timestamps based on sensor measurement time.
+   - Applies watermarking to gracefully handle out-of-order and late-arriving data.
+
+3. Bronze Layer (Raw Ingestion):
+   - Saves unprocessed raw sensor messages in JSON format to MinIO.
+   - Organizes data using a time-based partitioning scheme.
+
+4. Silver Layer (Enrichment & Transformation):
+   - Applies threshold-based filters to identify anomalies in temperature, gas levels, 
+     and humidity.
+   - Enriches data with station metadata from Redis (e.g., geographic coordinates, elevation).
+   - Persists enriched records to MinIO in Parquet format, partitioned by time and region.
+
+5. Gold Layer (Event Detection & Aggregation):
+   - Aggregates sensor readings over 1-minute windows grouped by microarea.
+   - Calculates fire severity, air quality metrics, fire behavior indices, and ignition estimates.
+   - Classifies each event as `"wildfire"` or `"normal"` and assigns a severity score.
+
+6. Alert Publishing:
+   - Writes structured alert messages to a Kafka topic (`gold_iot`) for visualization, 
+     notification, or automated response.
+
+Technologies:
+-------------
+- Apache Flink (PyFlink): Stream processing engine
+- Kafka: Real-time data ingestion and alert publishing
+- Redis: Metadata lookup for enrichment
+- MinIO: S3-compatible object store for lakehouse layers
+- Boto3: AWS-compatible MinIO client
+- Pandas & PyArrow: Efficient serialization and Parquet writing
+
+Architecture:
+-------------
+Medallion architecture with event-driven analytics:
+    Bronze (raw sensor data) →
+    Silver (cleaned & enriched data) →
+    Gold (event summaries & alerts)
 """
 
 # Utilities

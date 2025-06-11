@@ -196,7 +196,7 @@ Before running image acquisition containers, you must **configure your SentinelH
 - Go in the Config folder of the image producers containers (e.g. img_producer) and make sure to replace placeholders in `config.toml` with your own `client_id` and `client_secret`.  
 - These are obtained by registering your app at:  
 👉 [https://dataspace.copernicus.eu](https://dataspace.copernicus.eu)
-- After loggin in, go to your personal area (top right widget -> sentinel hub). Go to 'User setting' and in the bottom-right area a OAuth clients section can be seen. Create your own access keys. 
+- **After** loggin in, go to your personal area (top right widget 👤-> third option: sentinel hub). Go to 'User setting' and in the bottom-right area a OAuth clients section can be seen. Create your own access keys. 
 - An example of a configuration file .toml ready to use is provided inside the image producers containers.
 - For detailed help, refer to the official setup guide:  
 🔗 [sentinelhub-py configuration](https://sentinelhub-py.readthedocs.io/en/latest/configure.html)

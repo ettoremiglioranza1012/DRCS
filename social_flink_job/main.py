@@ -1,7 +1,86 @@
 
 """
-    Comment here!
+=================================================================================
+Social Media Emergency Detection - Real-Time Streaming Pipeline with Apache Flink
+=================================================================================
+
+Description:
+------------
+This script implements a real-time Apache Flink streaming pipeline that ingests, 
+classifies, filters, and stores social media messages related to emergencies using 
+Kafka, NLP microservices, and MinIO.
+
+Key Components:
+---------------
+1. Kafka Integration:
+   - Consumes raw social media messages from a Kafka topic (`social_msg`).
+   - Publishes NLP-classified messages to a Kafka topic (`nlp_social_msg`).
+   - Sends filtered, high-priority emergency messages to a Kafka topic (`gold_social`).
+
+2. Bronze Layer (Raw Ingestion):
+   - Stores unprocessed social messages as JSON files in MinIO under the 'bronze' bucket.
+   - Partitioned by timestamp for efficient querying and auditing.
+
+3. NLP Classification:
+   - Batches messages into 5-second event time windows.
+   - Sends them to an external NLP microservice for emergency category classification.
+   - Supports retry logic with exponential backoff to handle service unavailability.
+
+4. Filtering & Gold Layer:
+   - To optimize resource usage, we chose to implement a single Flink job that both produces and consumes
+    messages via Kafka, using an intermediate Kafka topic for decoupling between raw ingestion and NLP classification.
+    However, for a more robust and scalable architecture, the ideal approach would be to fully decouple the pipeline. 
+    This would involve:
+        
+        1. Offloading the message production to an independent ingestion service.
+        
+        2. Performing NLP classification asynchronously via dedicated NLP consumer services that:
+            - Consume raw messages from a partitioned Kafka topic (e.g., 8-16 partitions)
+            - Run multiple parallel instances (one or more per partition) for horizontal scaling
+            - Process messages in micro-batches to optimize HTTP overhead to NLP microservices
+            - Publish classified results to a separate Kafka topic with matching partitioning
+            - Implement circuit breaker patterns and retry mechanisms for resilience
+            - Scale independently based on processing throughput requirements
+        
+        3. Deploying a second Flink job dedicated to consuming classified messages and handling
+            downstream processing (filtering, enrichment, and persistence to gold layer and real-time dashboards).
+
+    This architecture eliminates blocking synchronous HTTP calls from Flink while leveraging Kafka's 
+    parallelization capabilities for optimal throughput and fault tolerance. 
+        
+    New system e.g.
+
+            Flink Upstream ->     Raw Messages   →   Kafka Topic (raw-messages) → NLP Service Consumer
+                                                                ↓
+            Flink Downstream <- Classified Messages ← Kafka Topic (classified-messages) ← NLP Results
+
+   What the gold layer is then doing now:
+   - Filters messages based on predefined emergency signal categories (e.g., fire, flood).
+   - Persists relevant classified messages as Parquet files to the 'gold' bucket in MinIO.
+   - Organizes messages by category and partitioned by date for analytics and dashboards.  
+
+5. Resilience & Observability:
+   - Waits for Kafka and MinIO readiness before pipeline execution.
+   - Implements full checkpointing and watermarking for reliable and accurate event time processing.
+   - Logs all major stages and handles errors gracefully throughout the pipeline.
+
+Environment Configuration:
+--------------------------
+- Kafka Broker: Defined via `KAFKA_SERVERS`
+- MinIO: Uses environment variables `MINIO_ENDPOINT`, `AWS_ACCESS_KEY_ID`, 
+  and `AWS_SECRET_ACCESS_KEY`
+- NLP Service: URL defined via `NLP_SERVICE_URL` with retry parameters
+
+Technologies:
+-------------
+- Apache Flink (PyFlink): Real-time stream processing engine
+- Kafka: Message broker for ingesting and forwarding social data
+- MinIO: S3-compatible object store for lakehouse persistence
+- Boto3: AWS-compatible client for storing data in MinIO
+- Pandas & PyArrow: Efficient Parquet serialization and transformation
+- Requests: For interacting with NLP microservice
 """
+
 
 # Utilities
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner

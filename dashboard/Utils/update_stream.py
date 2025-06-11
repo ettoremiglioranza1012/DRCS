@@ -1,9 +1,4 @@
 
-"""
-update_stream.py
-Batch updater for Kafka data queues (social, IoT, satellite) into Streamlit session state buffers.
-"""
-
 # Utilities
 from typing import Tuple, List, Dict, Any
 import queue
@@ -16,8 +11,17 @@ def update_all_data_batch(
     state: Dict[str, List[Dict[str, Any]]]
 ) -> Tuple[int, int, int]:
     """
-    Update state buffers from Kafka queues with batch limits.
-    Returns tuple of processed counts (social, iot, sat).
+    Pulls data in batches from the Kafka queues (social, IoT, satellite),
+    updates the corresponding session state buffers, and returns the number
+    of new items processed from each queue.
+
+    Each queue is processed with a defined batch size and the resulting
+    data is appended to the corresponding list in the Streamlit session state.
+    The oldest items are removed to retain only the most recent entries.
+
+    Returns:
+        Tuple of integers indicating how many items were processed from:
+        (social queue, IoT queue, satellite queue)
     """
 
     social_count = _process_queue_to_state(
@@ -55,7 +59,14 @@ def _process_queue_to_state(
     keep_last: int
 ) -> int:
     """
-    Helper function to process a queue and store into a given state dict.
+    Internal helper that reads up to `batch_size` items from the given queue
+    and appends them to the session state list identified by `state_key`.
+
+    Ensures that the session state retains only the latest `keep_last` items
+    (plus a small buffer) by trimming old entries if necessary.
+
+    Returns:
+        The number of items successfully read from the queue.
     """
     batch = []
     processed = 0
