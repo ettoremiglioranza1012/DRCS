@@ -21,13 +21,13 @@ The final output powers an interactive dashboard for emergency response agencies
 
 ---
 
-## 1. Study Case: California Wildfires 
+## 1. Case study: California Wildfires 
 
 <p align="center">
   <img src="./media/DRCS_logo.png" alt="DRCS Logo" width="300"/>
 </p>
 
-While the system architecture, data ingestion mechanisms, and insight generation capabilities of the **Disaster Response Coordination System (DRCS)** are designed to be general-purpose and adaptable to any disaster scenario worldwide, a specific study case is necessary to demonstrate the system’s capabilities in action. 
+While the system architecture, data ingestion mechanisms, and insight generation capabilities of the **Disaster Response Coordination System (DRCS)** are designed to be general-purpose and adaptable to any disaster scenario worldwide, a specific case study is necessary to demonstrate the system’s capabilities in action. 
 
 ### Selected Scenario 
 For this simulation, the development team chose to model a real-life disaster scenario involving **wildfires in California**, a region that has historically and recently (as of June 7, 2025) suffered significant damage due to this type of natural hazard. 
@@ -285,7 +285,7 @@ The dashboard enables emergency responders to make fast, informed decisions, vis
 
 ## 7. Authors
 
-- [Gino Biasioli](https://github.com/GinoBiasioli)
+- [Biasioli Gino](https://github.com/GinoBiasioli)
 - [Miglioranza Ettore](https://github.com/ettoremiglioranza1012)
 - [Tommaso Cestari](https://github.com/Tom28901)
 
