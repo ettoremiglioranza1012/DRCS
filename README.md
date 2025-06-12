@@ -218,6 +218,7 @@ If you have an M1, M2... processor Apple Silicon you need to run this command be
 4. **Run the application**:
 Be sure the docker engine is working, then run 
    ```bash
+   bash chmod +x entrypoint.sh
    bash ./entrypoint.sh
    ```
 
