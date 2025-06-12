@@ -25,7 +25,6 @@ TEMPLATES = {
         "We can't breathe {location}. Visibility is zero. Need help {urgency_adverb}."
     ],
     "infrastructure_or_property_damage": [
-        "{number_affected} {structure_type_plural} were {damage_action} near {region_type}.",
         "Our {property_type} is {destruction_level}. We couldn't do anything.",
         "Photos show {damage_signs} all over {area_reference}.",
         "{fire_behavior} {damage_action} our {buildings} completely.",
