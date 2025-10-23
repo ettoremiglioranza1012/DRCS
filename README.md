@@ -78,7 +78,7 @@ DRCS_1.0/
 ├── dashboard/
 │   ├── Dockerfile
 │   ├── dashboard.py
-│   └── Utils/
+│   └── src/
 ├── early_warning_model/
 │   ├── Dockerfile
 │   ├── main.py
@@ -89,7 +89,7 @@ DRCS_1.0/
 │   ├── prod_img.py
 │   ├── requirements.txt
 │   ├── Config/
-│   └── Utils/
+│   └── src/
 ├── iot_flink_job/
 │   ├── Dockerfile
 │   ├── main.py
@@ -106,7 +106,7 @@ DRCS_1.0/
 │   ├── Dockerfile
 │   ├── prod_msg.py
 │   ├── requirements.txt
-│   └── Utils/
+│   └── src/
 ├── nlp_microservice/
 │   ├── Dockerfile
 │   ├── main.py
@@ -119,7 +119,7 @@ DRCS_1.0/
 │   ├── Dockerfile
 │   ├── prod_sens.py
 │   ├── requirements.txt
-│   └── Utils/
+│   └── src/
 ├── setup_minio/
 │   └── create_minio_buckets.py
 ├── setup_orchestrator/

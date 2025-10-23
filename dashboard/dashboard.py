@@ -20,10 +20,10 @@ from streamlit_autorefresh import st_autorefresh
 import streamlit as st
 
 # Import utility modules
-from Utils.external_clients import initialize_external_connections
-from Utils.kafka_consumers import initialize_kafka_system
-from Utils.update_stream import update_all_data_batch
-from Utils.ui_components import (
+from src.external_clients import initialize_external_connections
+from src.kafka_consumers import initialize_kafka_system
+from src.update_stream import update_all_data_batch
+from src.ui_components import (
     render_satellite_tab,
     render_iot_tab, 
     render_social_tab,
