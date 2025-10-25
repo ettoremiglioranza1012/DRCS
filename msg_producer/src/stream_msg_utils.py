@@ -1,7 +1,7 @@
 
 # Utilities
-from Utils.data_templates import SIGNAL_CATEGORIES, NOISE_CATEGORIES, TEMPLATES, SYNONYMS
-from Utils.msg_utils import fetch_micro_bbox_from_db, GenerateMsg
+from src.data_templates import SIGNAL_CATEGORIES, NOISE_CATEGORIES, TEMPLATES, SYNONYMS
+from src.msg_utils import fetch_micro_bbox_from_db, GenerateMsg
 from kafka.errors import KafkaError
 from kafka import KafkaProducer
 from datetime import datetime

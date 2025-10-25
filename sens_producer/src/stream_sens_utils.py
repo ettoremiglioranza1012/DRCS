@@ -1,6 +1,6 @@
 
 # Utilities
-from Utils.geo_sens_utils import *
+from src.geo_sens_utils import *
 from kafka.errors import KafkaError
 from kafka import KafkaProducer
 from datetime import datetime
