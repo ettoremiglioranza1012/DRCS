@@ -1,12 +1,14 @@
 
 # Utilities
-from src.geo_sens_utils import *
+from src.data_templates import SIGNAL_CATEGORIES, NOISE_CATEGORIES, TEMPLATES, SYNONYMS
+from src.msg import fetch_micro_bbox_from_db, GenerateMsg
 from kafka.errors import KafkaError
 from kafka import KafkaProducer
 from datetime import datetime
 import logging
-import time
+import random
 import json
+import time
 
 
 # Logs Configuration
@@ -76,25 +78,17 @@ def on_send_error(excp: KafkaError):
     logger.error(f"[KAFKA ERROR] Failed to send message: {excp}")
 
 
-def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
+def stream_micro_msg(macroarea_i: int, microarea_i: int):
     """
-    Continuously simulates and streams fake IoT sensor measurements for a given microarea to a Kafka topic.
-
-    Steps:
-    1. Initializes a Kafka producer with retry logic.
-    2. Repeatedly fetches the number of stations for the specified microarea.
-    3. Generates and validates fake measurements for each station.
-    4. Serializes the data into JSON and sends it asynchronously to a Kafka topic.
-    5. Flushes the Kafka producer buffer and sleeps before the next iteration.
+    Streams synthetic social media messages for a specific macroarea and microarea.
 
     Parameters:
-        macroarea_i (int): The macroarea index (e.g., region identifier).
-        microarea_i (int): The microarea index (e.g., sub-region or cluster of sensors).
+    - macroarea_i (int or str): Identifier for the macroarea.
+    - microarea_i (int or str): Identifier for the microarea within the macroarea.
 
-    Returns:
-        None
+    This function generates and sends messages to Kafka at regular intervals using the producer.
     """
-    print("\n[SENS-PRODUCER-STREAM-PROCESS]\n")
+    print("\n[MSG-PRODUCER-STREAM-PROCESS]\n")
     
     # Initialize Kafka Producer with retry logic
     bootstrap_servers = ['kafka:9092']
@@ -117,48 +111,35 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
 
     while stream:
         try:
-            logger.info("Fetching microarea sensor stations information...")
-            n_stats = get_number_of_stats(macroarea_i, microarea_i)
-            if not isinstance(n_stats, int):
-                logger.error("'n_stats' must be an integer.")
-                continue
-            logger.info("Fetching completed successfully.")
-
-            if not n_stats:
-                logger.error(f"Number of stations inconsistent: {n_stats}, check data integrity.")
-                continue
-
-            # Generate fake measurements for i-th station in microarea
-            timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
-            records = list()
-            
-            microarea_bbox, _ = fetch_micro_bbox_from_db(macroarea_i, microarea_i)
-            logger.info(f"Fetching measurements for each station in microarea: 'A{macroarea_i}-M{microarea_i}'")
-            for i in range(n_stats):
-                min_long, min_lat, max_long, max_lat = microarea_bbox
-                temp_mes = generate_measurements_json(i+1, microarea_i, macroarea_i, timestamp, min_long, min_lat, max_long, max_lat)
-                if not temp_mes:
-                    logger.error(f"Measurements for 'S_A{macroarea_i}-M{microarea_i}_{i:03}' not consistent, check 'generate_measurements_json()' function.")
-                    continue
-                records.append(temp_mes)
-            
-            if not records:
-                logger.error("Message not consistent or too few stations, check data integrity.")
-                continue
-            logger.info("All tests passed. Message data OK -> ready to send to Kafka.")
-
-            # Queues the message in memory (producer buffer)
-            topic = f"sensor_meas"  # Custom topic per area
-            logger.info("Sending IoT sensor data to Kafka asynchronously...")
-
+            min_long, min_lat, max_long, max_lat = fetch_micro_bbox_from_db(macroarea_i, microarea_i)[0]
+            msg_lat = random.uniform(min_lat, max_lat)
+            msg_long = random.uniform(min_long, max_long)
             try:
-                # Create str area id
-                macroarea_id = f"A{macroarea_i}"
+                msg_gen = GenerateMsg(
+                    TEMPLATES,
+                    NOISE_CATEGORIES,
+                    SIGNAL_CATEGORIES,
+                    SYNONYMS,
+                    msg_lat,
+                    msg_long,
+                    macroarea_i,
+                    microarea_i
+                )
+                message = msg_gen.generate()
+                logger.info(f"Generated message in category at location ({msg_lat:.4f}, {msg_long:.4f})")
 
+            except Exception as e:
+                logger.error(f"GenerateMsg Class failed: {e}")
+
+            # Topic selection
+            topic = "social_msg"
+            
+            try:
+                # Convert payload in str
+                value = json.dumps(message)
+                
                 # Asynchronous sending
-                for record in records:
-                    value = json.dumps(record)
-                    producer.send(topic, value=value).add_callback(on_send_success).add_errback(on_send_error)
+                producer.send(topic, value=value).add_callback(on_send_success).add_errback(on_send_error)
                 logger.info("Message sent successfully.")
             
             except KafkaError as e:
@@ -166,7 +147,7 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
             
             except Exception as e:
                 logger.exception(f"[UNEXPECTED ERROR] An unknown error occurred while sending Kafka message: {e}")
-
+            
             # Ensure the message is actually sent before continuing to the next iteration
             try:
                 producer.flush()
@@ -174,11 +155,13 @@ def stream_micro_sens(macroarea_i: int, microarea_i:int) -> None:
             except Exception as e:
                 logger.error(f"Failed to flush the message: {e}")
                 continue
-
-            time.sleep(5)  # One message every 5 s
-
+            
+            time.sleep(1) # One message every second
+    
         except Exception as e:
-            logger.error(f"Unhandled error during streaming procedure: {e}")
+            logger.error(f"Failed to generate data for microarea_A{macroarea_i}-M{microarea_i}: {e}")
             continue
-
         
+        
+
+

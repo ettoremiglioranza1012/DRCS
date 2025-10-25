@@ -1,6 +1,6 @@
 
 # Utilities
-from src.stream_sens_utils import stream_micro_sens
+from src.stream_sens import stream_micro_sens
 
 
 def stream_example():

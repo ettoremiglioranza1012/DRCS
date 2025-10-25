@@ -1,6 +1,6 @@
 
 # Utilities
-from src.db_utils import connect_to_db
+from src.db import connect_to_db
 from typing import Dict, Tuple
 from psycopg2 import sql
 import random

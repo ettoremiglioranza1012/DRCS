@@ -1,11 +1,11 @@
 
 # Utilities
-from src.imgfilter_utils import filter_image
-from src.db_utils import connect_to_db
+from src.imgfilter import filter_image
+from src.db import connect_to_db
 from psycopg2 import sql
 import logging
 
-from src.geo_img_utils import (
+from src.geo_img import (
     compress_image_with_pil,
     serialize_image_payload,
     firedet_bands_metadata

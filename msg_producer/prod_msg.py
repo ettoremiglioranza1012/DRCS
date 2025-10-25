@@ -1,6 +1,6 @@
 
 # Utilities
-from src.stream_msg_utils import stream_micro_msg
+from src.stream_msg import stream_micro_msg
 
 def stream_example():
     macroarea_i = 1

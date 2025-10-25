@@ -7,7 +7,7 @@ import logging
 import json
 import time
 
-from src.imgfetch_utils import (
+from src.imgfetch import (
     get_aoi_bbox_and_size,
     true_color_image_request_processing,
     process_image,
