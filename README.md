@@ -65,7 +65,7 @@ This scenario allows users to observe how the DRCS system performs in a realisti
 
 ## 2. Project Structure
 ```
-DRCS_1.0/
+DRCS/
 ├── docker-compose.yml
 ├── docker-compose.early_warning.yml
 ├── entrypoint.sh
@@ -79,17 +79,28 @@ DRCS_1.0/
 │   ├── Dockerfile
 │   ├── dashboard.py
 │   └── src/
+│       ├── external_clients.py
+│       ├── kafka_consumers.py
+│       ├── ui_components.py
+│       └── update_stream.py
 ├── early_warning_model/
 │   ├── Dockerfile
 │   ├── main.py
 │   ├── requirements.txt
 │   └── Utils/
+│       └── model_utils.py
 ├── img_producer/
 │   ├── Dockerfile
 │   ├── prod_img.py
 │   ├── requirements.txt
 │   ├── Config/
+│   │   └── config.toml
 │   └── src/
+│       ├── db.py
+│       ├── geo_img.py
+│       ├── imgfetch.py
+│       ├── imgfilter.py
+│       └── stream_img.py
 ├── iot_flink_job/
 │   ├── Dockerfile
 │   ├── main.py
@@ -102,11 +113,16 @@ DRCS_1.0/
 │   ├── data_loader.py
 │   ├── requirements.txt
 │   └── Utils/
+│       └── db_utils.py
 ├── msg_producer/
 │   ├── Dockerfile
 │   ├── prod_msg.py
 │   ├── requirements.txt
 │   └── src/
+│       ├── data_templates.py
+│       ├── db.py
+│       ├── msg.py
+│       └── stream_msg.py
 ├── nlp_microservice/
 │   ├── Dockerfile
 │   ├── main.py
@@ -120,6 +136,9 @@ DRCS_1.0/
 │   ├── prod_sens.py
 │   ├── requirements.txt
 │   └── src/
+│       ├── db.py
+│       ├── geo_sens.py
+│       └── stream_sens.py
 ├── setup_minio/
 │   └── create_minio_buckets.py
 ├── setup_orchestrator/
@@ -129,7 +148,11 @@ DRCS_1.0/
 │   ├── preload_redis.py
 │   ├── requirements.txt
 │   ├── Macro_data/
+│   │   └── Macro_input/
+│   │       └── macroarea_1.json
 │   └── Utils/
+│       ├── db_utils.py
+│       └── geo_grid_utils.py
 ├── social_flink_job/
 │   ├── Dockerfile
 │   ├── main.py
@@ -138,23 +161,33 @@ DRCS_1.0/
 
 The repository is organized into several key directories and files:
 
-- **dashboard/**: Contains the interactive dashboard application used by emergency responders. Includes the main visualization script and utility functions, along with a dedicated Dockerfile for containerization.
+- **dashboard/**: Contains the interactive dashboard application used by emergency responders. Includes the main visualization script (`dashboard.py`) and modular source files in the `src/` directory for external client connections, Kafka consumers, UI components, and data stream updates. Includes a dedicated Dockerfile for containerization.
 
-- **early_warning_model/**: Hosts the predictive model that detects potential wildfire outbreaks using historical and weather data. Includes supporting utilities and dependencies.
+- **early_warning_model/**: Hosts the predictive model that detects potential wildfire outbreaks using historical and weather data. Contains the main execution script (`main.py`) and supporting utilities in the `Utils/` directory, along with dependencies defined in `requirements.txt`.
 
-- **img_producer/, msg_producer/, sens_producer/**: These components simulate or stream real-time data (satellite images, social media messages, sensor readings) into Kafka topics. Each includes utility functions, config files, and a Dockerfile.
+- **img_producer/, msg_producer/, sens_producer/**: These components simulate or stream real-time data (satellite images, social media messages, sensor readings) into Kafka topics. Each producer includes:
+  - Main producer script (`prod_img.py`, `prod_msg.py`, `prod_sens.py`)
+  - **src/** directory with modular Python files for database connections, geospatial processing, streaming logic, and data generation
+  - Configuration files (e.g., `Config/config.toml` for Sentinel Hub credentials in `img_producer`)
+  - Dependencies (`requirements.txt`) and Dockerfile
 
-- **iot_flink_job/, satellite_flink_job/, social_flink_job/**: Apache Flink jobs responsible for consuming, enriching, and processing IoT, satellite, and social media streams in real time.
+- **iot_flink_job/, satellite_flink_job/, social_flink_job/**: Apache Flink jobs responsible for consuming, enriching, and processing IoT, satellite, and social media streams in real time. Each includes processing logic (`main.py`), shared data templates, and a Dockerfile.
 
-- **meteo_data/**: Includes historical weather data with fire risk labels for model training (meteo_totrain) and forecasted data for making predictions (meteo_forecast). All files are in CSV format.
+- **meteo_data/**: Includes historical weather data with fire risk labels for model training (`meteo_totrain.csv`) and forecasted data for making predictions (`meteo_forecast.csv`). All files are in CSV format.
 
-- **meteo_data_loader/**: A lightweight component for loading official weather forecast data into the system. Includes a Dockerfile and requirements.
+- **meteo_data_loader/**: A lightweight component for loading official weather forecast data into the PostgreSQL database. Includes utility functions in the `Utils/` directory, a Dockerfile, and requirements.
 
-- **nlp_microservice/**: Provides natural language processing capabilities for classifying and extracting signals from social media posts using TF-IDF vectorization. Includes data templates and a lightweight Flask/FastAPI service.
+- **nlp_microservice/**: Provides natural language processing capabilities for classifying and extracting signals from social media posts using TF-IDF vectorization. Includes data templates and a lightweight FastAPI service with its own Dockerfile.
 
-- **setup_minio/**: Includes scripts to initialize and configure MinIO buckets used as the storage backend for the Data Lakehouse (bronze, silver, gold layers).
+- **setup_minio/**: Includes a Python script (`create_minio_buckets.py`) to initialize and configure MinIO buckets used as the storage backend for the Data Lakehouse (bronze, silver, gold layers).
 
-- **setup_orchestrator/**: Coordinates geospatial grid preprocessing and prepares foundational data. Also handles stateful tasks like Redis preloading. Contains both scripts and macro data assets.
+- **setup_orchestrator/**: Coordinates geospatial grid preprocessing and prepares foundational data. Includes:
+  - Main orchestration script (`orchestrator.py`)
+  - Geospatial grid processing (`geo_grid_processor.py`)
+  - Redis cache preloading (`preload_redis.py`)
+  - Macro area GeoJSON files in `Macro_data/Macro_input/`
+  - Utility functions in the `Utils/` directory
+  - Dockerfile and dependencies
 
 - **media/**: Visual assets including the system architecture diagram, dataflow schematic, and project logo.
 
